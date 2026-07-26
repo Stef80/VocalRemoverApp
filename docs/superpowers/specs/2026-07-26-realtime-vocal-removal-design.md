@@ -141,6 +141,14 @@ File audio ──▶ MediaExtractor/MediaCodec (AudioPlayer, invariato)
   soggettiva che la voce sia rimossa e assenza di artefatti udibili ai
   confini dei chunk.
 
+## Nota UI
+
+Questa spec non include modifiche UI (l'app usa oggi XML/View binding in
+`MainActivity`). Le prossime spec che toccano l'UI (es. esposizione di
+`onPerformanceWarning`, controlli per la cattura di sistema, testi
+sincronizzati) dovranno essere implementate in **Jetpack Compose**
+anziché estendere il layout XML esistente.
+
 ## Fuori scope (sotto-progetti futuri)
 
 - Cattura audio di sistema da altre app (`MediaProjection` +

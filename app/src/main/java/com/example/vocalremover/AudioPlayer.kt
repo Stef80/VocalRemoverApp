@@ -5,10 +5,11 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.net.Uri
 import android.util.Log
-import be.tarsos.dsp.io.android.AndroidFFMPEGLocator
-import be.tarsos.dsp.io.android.AudioDispatcherFactory
 import kotlinx.coroutines.*
 import java.io.ByteArrayOutputStream
 
@@ -67,38 +68,113 @@ class AudioPlayer(private val context: Context) {
         }
     }
 
-    // ── Decodifica audio con TarsosDSP ───────────────────────────────────────
+    // ── Decodifica audio con MediaExtractor + MediaCodec ─────────────────────
 
     private fun decodeAudio(uri: Uri): FloatArray {
-        val baos = ByteArrayOutputStream()
+        val extractor = MediaExtractor()
+        val rawSamples = ByteArrayOutputStream()
+        var srcSampleRate = SAMPLE_RATE
+        var srcChannels = 1
+        var isPcmFloat = false
+
         try {
-            // TarsosDSP usa Android MediaCodec/FFmpeg per decodificare
-            val dispatcher = AudioDispatcherFactory.fromPipe(
-                context.contentResolver.openInputStream(uri)!!,
-                SAMPLE_RATE,
-                4096,       // buffer size
-                0           // overlap
-            )
-            dispatcher.addAudioProcessor { audioEvent ->
-                // audioEvent.floatBuffer è mono float32 normalizzato
-                val buf = audioEvent.floatBuffer
-                val bytes = ByteArray(buf.size * 4)
-                val bb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-                buf.forEach { bb.putFloat(it) }
-                baos.write(bytes)
-                true
+            extractor.setDataSource(context, uri, null)
+
+            var audioTrackIdx = -1
+            var format: MediaFormat? = null
+            for (i in 0 until extractor.trackCount) {
+                val f = extractor.getTrackFormat(i)
+                val mime = f.getString(MediaFormat.KEY_MIME) ?: continue
+                if (mime.startsWith("audio/")) { audioTrackIdx = i; format = f; break }
             }
-            dispatcher.run()
+            if (audioTrackIdx < 0 || format == null) {
+                Log.e(TAG, "Nessuna traccia audio trovata")
+                return FloatArray(0)
+            }
+
+            srcSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            srcChannels  = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            extractor.selectTrack(audioTrackIdx)
+
+            val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+            codec.configure(format, null, null, 0)
+            codec.start()
+
+            val info = MediaCodec.BufferInfo()
+            var eosIn = false
+            var eosOut = false
+            while (!eosOut) {
+                if (!eosIn) {
+                    val idx = codec.dequeueInputBuffer(10_000)
+                    if (idx >= 0) {
+                        val buf = codec.getInputBuffer(idx)!!
+                        val size = extractor.readSampleData(buf, 0)
+                        if (size < 0) {
+                            codec.queueInputBuffer(idx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            eosIn = true
+                        } else {
+                            codec.queueInputBuffer(idx, 0, size, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+                val idx = codec.dequeueOutputBuffer(info, 10_000)
+                when {
+                    idx >= 0 -> {
+                        val buf = codec.getOutputBuffer(idx)!!
+                        val bytes = ByteArray(info.size)
+                        buf.get(bytes)
+                        rawSamples.write(bytes)
+                        codec.releaseOutputBuffer(idx, false)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) eosOut = true
+                    }
+                    idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val outFmt = codec.outputFormat
+                        isPcmFloat = outFmt.getInteger(
+                            MediaFormat.KEY_PCM_ENCODING,
+                            AudioFormat.ENCODING_PCM_16BIT
+                        ) == AudioFormat.ENCODING_PCM_FLOAT
+                    }
+                }
+            }
+            codec.stop()
+            codec.release()
         } catch (e: Exception) {
-            Log.e(TAG, "Errore decodifica TarsosDSP", e)
-            // Fallback: leggi direttamente dallo stream come PCM raw se già PCM
+            Log.e(TAG, "Errore decodifica audio", e)
+            return FloatArray(0)
+        } finally {
+            extractor.release()
         }
 
-        val bytes = baos.toByteArray()
-        val floatArray = FloatArray(bytes.size / 4)
-        val bb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        for (i in floatArray.indices) floatArray[i] = bb.getFloat()
-        return floatArray
+        // Raw bytes → float32
+        val raw = rawSamples.toByteArray()
+        val bb = java.nio.ByteBuffer.wrap(raw).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        val floats = if (isPcmFloat) {
+            FloatArray(raw.size / 4) { bb.getFloat() }
+        } else {
+            FloatArray(raw.size / 2) { bb.getShort().toFloat() / 32768f }
+        }
+
+        // Stereo → mono
+        val mono = if (srcChannels >= 2) {
+            FloatArray(floats.size / srcChannels) { i ->
+                var sum = 0f
+                for (ch in 0 until srcChannels) sum += floats[i * srcChannels + ch]
+                sum / srcChannels
+            }
+        } else floats
+
+        // Resample → SAMPLE_RATE (linear interpolation)
+        if (srcSampleRate == SAMPLE_RATE) return mono
+        val ratio = srcSampleRate.toDouble() / SAMPLE_RATE
+        val outLen = (mono.size / ratio).toInt()
+        return FloatArray(outLen) { i ->
+            val pos = i * ratio
+            val lo = pos.toInt().coerceAtMost(mono.size - 1)
+            val hi = (lo + 1).coerceAtMost(mono.size - 1)
+            val frac = (pos - lo).toFloat()
+            mono[lo] * (1f - frac) + mono[hi] * frac
+        }
     }
 
     // ── Riproduzione ─────────────────────────────────────────────────────────

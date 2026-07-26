@@ -130,7 +130,7 @@
             android:id="@+id/btnStop"
             android:layout_width="64dp"
             android:layout_height="64dp"
-            android:src="@android:drawable/ic_media_stop"
+            android:src="@drawable/ic_stop"
             android:enabled="false"
             android:background="@drawable/circle_button_bg"
             android:padding="14dp"

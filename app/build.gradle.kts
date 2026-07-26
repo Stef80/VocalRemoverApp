@@ -50,19 +50,17 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
-    // TensorFlow Lite (GPU delegate opzionale)
+    // TensorFlow Lite
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
 
-    // TarsosDSP per FFT e audio I/O su Android
-    implementation("be.tarsos.dsp:core:2.5")
-    implementation("be.tarsos.dsp:jvm:2.5")
+    // TarsosDSP rimosso: decodifica gestita con MediaExtractor/MediaCodec nativi
 
-    // Coroutines per elaborazione asincrona
+    // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    // MediaStore / ExoPlayer per decodifica audio
+    // Media3 / ExoPlayer
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
 }
