@@ -6,6 +6,9 @@
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
+    <!-- Android 16 (API 36): notifica per riproduzione in foreground -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- Impedisce la sospensione CPU durante l'elaborazione -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
