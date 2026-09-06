@@ -15,8 +15,9 @@ app/release/
 *.aab
 *.keystore
 
-# TFLite model (troppo grande per git — usa Git LFS se necessario)
+# Modelli ML (troppo grandi per git — usa Git LFS se necessario)
 *.tflite
+*.onnx
 
 # Python
 __pycache__/

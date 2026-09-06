@@ -1,6 +1,23 @@
 """
 convert_spleeter.py
 ===================
+DEPRECATO: l'app ora usa ONNX Runtime + un modello MDX-Net
+già pre-convertito in formato .onnx (community Ultimate Vocal Remover),
+al posto di TensorFlow Lite/Spleeter. Non serve più eseguire questo
+script né installare TensorFlow.
+
+Per ottenere il modello:
+    1. Scarica un modello MDX-Net in formato .onnx (es. da
+       https://github.com/TRvlvr/model_repo o repository Hugging Face
+       della community UVR).
+    2. Verifica shape input/output con https://netron.app e allinea
+       StftProcessor.kt (nFft/hopLength) e VocalRemover.kt se necessario.
+    3. Rinomina il file "vocal_remover.onnx" e copialo in
+       app/src/main/assets/.
+
+Questo script è mantenuto solo per riferimento storico (pipeline
+Spleeter → TFLite precedente).
+
 Converte il modello Spleeter 2-stems (TensorFlow SavedModel) in un file
 TFLite compatibile con l'app Android.
 

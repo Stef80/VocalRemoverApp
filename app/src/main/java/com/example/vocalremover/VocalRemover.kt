@@ -1,62 +1,68 @@
 package com.example.vocalremover
 
+import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.util.Log
-import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.gpu.GpuDelegate
-import java.io.FileInputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.MappedByteBuffer
-import java.nio.channels.FileChannel
-import kotlin.math.sqrt
+import java.nio.FloatBuffer
 
 /**
- * Carica il modello TFLite di Spleeter (2-stems) e separa
- * la traccia strumentale da quella vocale.
+ * Carica un modello ONNX di separazione vocale (es. MDX-Net, esportato/pre-convertito
+ * dalla community "Ultimate Vocal Remover") e separa la traccia strumentale da quella vocale.
+ *
+ * Sostituisce la precedente implementazione basata su TensorFlow Lite + Spleeter:
+ * nessuna conversione da TensorFlow è più necessaria. Basta scaricare un modello
+ * MDX-Net già convertito in formato .onnx e copiarlo in app/src/main/assets/.
  *
  * Il modello si aspetta come input lo spettrogramma di magnitudine:
  *   shape = [1, frames, freqBins]   (float32)
- * e restituisce due maschere soft:
- *   vocals_mask      shape = [1, frames, freqBins]
+ * e restituisce la maschera dell'accompagnamento (strumentale):
  *   accompaniment_mask shape = [1, frames, freqBins]
  *
- * Metti il file "spleeter_2stems.tflite" in app/src/main/assets/.
- * Per convertirlo usa lo script Python fornito (convert_spleeter.py).
+ * NOTA: i modelli MDX-Net non condividono tutti la stessa architettura di input/output.
+ * Verifica con netron.app (o l'output di debug loggato all'avvio) la shape reale del tuo
+ * modello e allinea di conseguenza [StftProcessor] (nFft/hopLength) e [MODEL_OUTPUT_INDEX]
+ * se il tuo modello restituisce la maschera vocale anziché quella strumentale, o lavora
+ * su canali reali/immaginari separati invece che sulla sola magnitudine.
  */
 class VocalRemover(context: Context) {
 
     companion object {
         private const val TAG = "VocalRemover"
-        private const val MODEL_ASSET = "spleeter_2stems.tflite"
+        private const val MODEL_ASSET = "vocal_remover.onnx"
         // Chunk di frame processati per volta (evita OOM su dispositivi con poca RAM)
         const val CHUNK_FRAMES = 512
+        // Indice dell'output del modello da usare come maschera strumentale.
+        // Molti modelli MDX-Net restituiscono un solo output (maschera/spettro strumentale);
+        // se il tuo modello espone più output, aggiorna questo indice.
+        private const val MODEL_OUTPUT_INDEX = 0
     }
 
     private val stft = StftProcessor()
-    private val interpreter: Interpreter
+    private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
+    private val session: OrtSession
+    private val inputName: String
+    private val outputName: String
 
     init {
-        val model = loadModelFile(context)
-        val options = Interpreter.Options().apply {
-            numThreads = 4
-            // Prova ad usare la GPU delegate; fallback su CPU se non disponibile
+        val modelBytes = context.assets.open(MODEL_ASSET).use { it.readBytes() }
+        val options = OrtSession.SessionOptions().apply {
+            setIntraOpNumThreads(4)
             try {
-                addDelegate(GpuDelegate())
-                Log.d(TAG, "GPU delegate attivo")
+                addNnapi()
+                Log.d(TAG, "NNAPI execution provider attivo")
             } catch (e: Exception) {
-                Log.w(TAG, "GPU delegate non disponibile, uso CPU: ${e.message}")
+                Log.w(TAG, "NNAPI non disponibile, uso CPU: ${e.message}")
             }
         }
-        interpreter = Interpreter(model, options)
-        Log.d(TAG, "Modello caricato. Input: ${interpreter.getInputTensor(0).shape().contentToString()}")
-    }
-
-    private fun loadModelFile(context: Context): MappedByteBuffer {
-        val assetFd = context.assets.openFd(MODEL_ASSET)
-        val inputStream = FileInputStream(assetFd.fileDescriptor)
-        val channel = inputStream.channel
-        return channel.map(FileChannel.MapMode.READ_ONLY, assetFd.startOffset, assetFd.declaredLength)
+        session = env.createSession(modelBytes, options)
+        inputName = session.inputNames.iterator().next()
+        // Usa MODEL_OUTPUT_INDEX-esimo output dichiarato dal modello (di norma l'unico, o
+        // la maschera dell'accompagnamento se il modello ne espone più di uno).
+        outputName = session.outputNames.toList()[MODEL_OUTPUT_INDEX]
+        Log.d(TAG, "Modello caricato. Input: $inputName, info: ${session.inputInfo[inputName]}")
+        Log.d(TAG, "Output disponibili: ${session.outputNames}, usato: $outputName")
     }
 
     // ── API pubblica ─────────────────────────────────────────────────────────
@@ -85,35 +91,27 @@ class VocalRemover(context: Context) {
             val chunkEnd = minOf(frameOffset + CHUNK_FRAMES, totalFrames)
             val chunkSize = chunkEnd - frameOffset
 
-            // Input buffer: [1, chunkSize, freqBins]
-            val inputBuffer = ByteBuffer.allocateDirect(
-                1 * chunkSize * stft.freqBins * 4
-            ).order(ByteOrder.nativeOrder())
-
+            // Input tensor: [1, chunkSize, freqBins]
+            val inputData = FloatArray(chunkSize * stft.freqBins)
+            var idx = 0
             for (f in frameOffset until chunkEnd) {
-                for (k in 0 until stft.freqBins) inputBuffer.putFloat(mag[f][k])
+                for (k in 0 until stft.freqBins) inputData[idx++] = mag[f][k]
             }
-            inputBuffer.rewind()
+            val inputTensor = OnnxTensor.createTensor(
+                env,
+                FloatBuffer.wrap(inputData),
+                longArrayOf(1L, chunkSize.toLong(), stft.freqBins.toLong())
+            )
 
-            // Output: maschera accompagnamento [1, chunkSize, freqBins]
-            val outputBuffer = ByteBuffer.allocateDirect(
-                1 * chunkSize * stft.freqBins * 4
-            ).order(ByteOrder.nativeOrder())
-
-            // Il secondo output del modello è la maschera dell'accompagnamento
-            val outputs = HashMap<Int, Any>()
-            outputs[0] = outputBuffer  // vocals mask (indice 0)
-            outputs[1] = ByteBuffer.allocateDirect(1 * chunkSize * stft.freqBins * 4)
-                .order(ByteOrder.nativeOrder())  // accompaniment mask (indice 1)
-
-            interpreter.runForMultipleInputsOutputs(arrayOf(inputBuffer), outputs)
-
-            // Leggi la maschera dell'accompagnamento (output 1)
-            val accompBuf = outputs[1] as ByteBuffer
-            accompBuf.rewind()
-            for (f in 0 until chunkSize) {
-                for (k in 0 until stft.freqBins) {
-                    accompMask[frameOffset + f][k] = accompBuf.getFloat()
+            inputTensor.use { tensor ->
+                session.run(mapOf(inputName to tensor)).use { results ->
+                    val outputTensor = results.get(outputName).get() as OnnxTensor
+                    val outputBuffer = outputTensor.floatBuffer
+                    for (f in 0 until chunkSize) {
+                        for (k in 0 until stft.freqBins) {
+                            accompMask[frameOffset + f][k] = outputBuffer.get()
+                        }
+                    }
                 }
             }
 
@@ -136,5 +134,5 @@ class VocalRemover(context: Context) {
         return result
     }
 
-    fun close() = interpreter.close()
+    fun close() = session.close()
 }

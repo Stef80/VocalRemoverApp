@@ -34,7 +34,7 @@ android {
         viewBinding = true
     }
 
-    // Exclude conflicting native libs from TFLite
+    // Exclude conflicting native libs (es. tra onnxruntime e altre dipendenze)
     packaging {
         jniLibs {
             pickFirsts += listOf("**/libc++_shared.so")
@@ -50,10 +50,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
-    // TensorFlow Lite
-    implementation("org.tensorflow:tensorflow-lite:2.16.1")
-    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
-    implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
+    // ONNX Runtime (sostituisce TensorFlow Lite: nessuna conversione TF richiesta,
+    // usa modelli MDX-Net già pre-convertiti in formato .onnx dalla community UVR)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.2")
 
     // TarsosDSP rimosso: decodifica gestita con MediaExtractor/MediaCodec nativi
 
