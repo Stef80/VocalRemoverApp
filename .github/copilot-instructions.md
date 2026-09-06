@@ -1,5 +1,9 @@
 # Copilot Instructions for VocalRemoverApp
 
+## Model file setup (required before build)
+
+`app/src/main/assets/vocal_remover.onnx` (~108MB, Open-Unmix UMX-L) is **not tracked in git** (excluded via `.gitignore`, `*.onnx`) because it exceeds GitHub's 100MB file size limit. It must be downloaded manually and placed at that exact path before building — see `README.md` for the download link and steps. Do not attempt to `git add -f` this file; it will be rejected by GitHub's push size check.
+
 ## Build, test, and lint
 
 This repository is an Android app built with Gradle Kotlin DSL (`build.gradle.kts`, `app/build.gradle.kts`).
