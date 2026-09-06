@@ -10,7 +10,6 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.*
-import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -43,18 +42,27 @@ class AudioPlayer(private val context: Context) {
     suspend fun loadAndProcess(uri: Uri, remover: VocalRemover) = withContext(Dispatchers.IO) {
         try {
             onProgress(2)
-            val rawPcm = decodeAudio(uri)
-            if (rawPcm == null || rawPcm.size == 0) {
-                withContext(Dispatchers.Main) { onError("Impossibile decodificare il file audio") }
+            
+            // Decodifica e processamento in blocchi per limitare i riferimenti contemporanei ad array giganti
+            val instrumental = decodeAudio(uri)?.let { mix ->
+                Log.d(TAG, "Decodificati ${mix.size} frame stereo")
+                val result = remover.removeVocals(mix) { progress ->
+                    onProgress(progress)
+                }
+                result
+            }
+
+            if (instrumental == null) {
+                withContext(Dispatchers.Main) { onError("Impossibile decodificare o elaborare il file audio") }
                 return@withContext
             }
-            Log.d(TAG, "Decodificati ${rawPcm.size} frame stereo")
 
-            val instrumental = remover.removeVocals(rawPcm) { progress ->
-                onProgress(progress)
-            }
-
+            // A questo punto il mix originale non è più referenziato e può essere rimosso dal GC.
+            // Facciamo il downmix strumentale e liberiamo anche la versione stereo dello strumentale.
             processedPcm = instrumental.downmix()
+            
+            System.gc() // Suggerimento per ripulire mix originale e instrumental stereo
+
             withContext(Dispatchers.Main) {
                 prepareAudioTrack()
                 onReady()
@@ -68,11 +76,6 @@ class AudioPlayer(private val context: Context) {
 
     private fun decodeAudio(uri: Uri): StereoPcm? {
         val extractor = MediaExtractor()
-        val rawSamples = ByteArrayOutputStream()
-        var srcSampleRate = SAMPLE_RATE
-        var srcChannels = 1
-        var isPcmFloat = false
-
         try {
             extractor.setDataSource(context, uri, null)
             var audioTrackIdx = -1
@@ -84,16 +87,25 @@ class AudioPlayer(private val context: Context) {
             }
             if (audioTrackIdx < 0 || format == null) return null
 
-            srcSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            srcChannels  = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            extractor.selectTrack(audioTrackIdx)
+            val srcSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            val srcChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
+            
+            // Stima iniziale dei campioni per evitare troppi ridimensionamenti e array intermedi
+            val initialCapacity = if (durationUs > 0) ((durationUs * srcSampleRate) / 1_000_000L).toInt() + 1000 else 1024 * 1024
+            var left = FloatArray(initialCapacity)
+            var right = FloatArray(initialCapacity)
+            var sampleIndex = 0
 
+            extractor.selectTrack(audioTrackIdx)
             val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
             codec.configure(format, null, null, 0)
             codec.start()
 
             val info = MediaCodec.BufferInfo()
+            var isPcmFloat = false
             var eosOut = false
+            
             while (!eosOut) {
                 val inIdx = codec.dequeueInputBuffer(10_000)
                 if (inIdx >= 0) {
@@ -109,40 +121,71 @@ class AudioPlayer(private val context: Context) {
                 
                 val outIdx = codec.dequeueOutputBuffer(info, 10_000)
                 if (outIdx >= 0) {
-                    val buf = codec.getOutputBuffer(outIdx)!!
-                    val bytes = ByteArray(info.size)
-                    buf.get(bytes)
-                    rawSamples.write(bytes)
+                    if (info.size > 0) {
+                        val buf = codec.getOutputBuffer(outIdx)!!
+                        buf.order(ByteOrder.LITTLE_ENDIAN)
+                        
+                        val bytesPerSample = if (isPcmFloat) 4 else 2
+                        val numFrames = info.size / (bytesPerSample * srcChannels)
+                        
+                        // Ridimensiona se la stima iniziale era troppo piccola
+                        if (sampleIndex + numFrames > left.size) {
+                            val newSize = (left.size * 1.5).toInt() + numFrames
+                            left = left.copyOf(newSize)
+                            right = right.copyOf(newSize)
+                        }
+
+                        for (i in 0 until numFrames) {
+                            if (isPcmFloat) {
+                                left[sampleIndex] = buf.float
+                                right[sampleIndex] = if (srcChannels >= 2) buf.float else left[sampleIndex]
+                                // Salta eventuali altri canali (es. 5.1)
+                                for (c in 2 until srcChannels) buf.float
+                            } else {
+                                left[sampleIndex] = buf.short.toFloat() / 32768f
+                                right[sampleIndex] = if (srcChannels >= 2) buf.short.toFloat() / 32768f else left[sampleIndex]
+                                for (c in 2 until srcChannels) buf.short
+                            }
+                            sampleIndex++
+                        }
+                    }
+                    
                     codec.releaseOutputBuffer(outIdx, false)
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) eosOut = true
                 } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    isPcmFloat = codec.outputFormat.getInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT) == AudioFormat.ENCODING_PCM_FLOAT
+                    val outFormat = codec.outputFormat
+                    isPcmFloat = outFormat.getInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT) == AudioFormat.ENCODING_PCM_FLOAT
                 }
             }
             codec.stop(); codec.release()
-        } catch (e: Exception) { return null } finally { extractor.release() }
 
-        val raw = rawSamples.toByteArray()
-        val bb = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN)
-        val floats = if (isPcmFloat) FloatArray(raw.size / 4) { bb.float } else FloatArray(raw.size / 2) { bb.short.toFloat() / 32768f }
+            // Tronca alla dimensione effettiva
+            val decodedL = if (sampleIndex == left.size) left else left.copyOf(sampleIndex)
+            val decodedR = if (sampleIndex == right.size) right else right.copyOf(sampleIndex)
+            
+            if (srcSampleRate == SAMPLE_RATE) return StereoPcm(decodedL, decodedR)
 
-        val frameCount = floats.size / srcChannels
-        val left = FloatArray(frameCount) { i -> floats[i * srcChannels] }
-        val right = FloatArray(frameCount) { i ->
-            if (srcChannels >= 2) floats[i * srcChannels + 1] else left[i]
+            // Resampling lineare se il file non è a 44.1kHz
+            val ratio = srcSampleRate.toDouble() / SAMPLE_RATE
+            val outLen = (decodedL.size / ratio).toInt()
+            val resampledL = FloatArray(outLen)
+            val resampledR = FloatArray(outLen)
+            for (i in 0 until outLen) {
+                val pos = i * ratio
+                val lo = pos.toInt().coerceAtMost(decodedL.size - 1)
+                val hi = (lo + 1).coerceAtMost(decodedL.size - 1)
+                val frac = (pos - lo).toFloat()
+                resampledL[i] = decodedL[lo] * (1f - frac) + decodedL[hi] * frac
+                resampledR[i] = decodedR[lo] * (1f - frac) + decodedR[hi] * frac
+            }
+            return StereoPcm(resampledL, resampledR)
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error decoding audio", e)
+            return null
+        } finally {
+            extractor.release()
         }
-
-        if (srcSampleRate == SAMPLE_RATE) return StereoPcm(left, right)
-        val ratio = srcSampleRate.toDouble() / SAMPLE_RATE
-        val outLen = (left.size / ratio).toInt()
-        fun resample(input: FloatArray): FloatArray = FloatArray(outLen) { i ->
-            val pos = i * ratio
-            val lo = pos.toInt().coerceAtMost(input.size - 1)
-            val hi = (lo + 1).coerceAtMost(input.size - 1)
-            val frac = (pos - lo).toFloat()
-            input[lo] * (1f - frac) + input[hi] * frac
-        }
-        return StereoPcm(resample(left), resample(right))
     }
 
     private fun prepareAudioTrack() {
@@ -168,7 +211,6 @@ class AudioPlayer(private val context: Context) {
             val totalFrames = pcm.size
             val totalMs = (totalFrames * 1000L / SAMPLE_RATE).toInt()
             
-            // Chunk size per lo streaming (es. 20ms di audio)
             val chunkSize = 4096 
             
             while (isActive && playheadPosition < totalFrames && track.playState != AudioTrack.PLAYSTATE_STOPPED) {
@@ -208,7 +250,8 @@ class AudioPlayer(private val context: Context) {
     }
 
     fun seekTo(ms: Int) {
-        val newPosition = (ms.toLong() * SAMPLE_RATE / 1000).toInt().coerceIn(0, processedPcm?.size ?: 0)
+        val pcm = processedPcm ?: return
+        val newPosition = (ms.toLong() * SAMPLE_RATE / 1000).toInt().coerceIn(0, pcm.size)
         
         val wasPlaying = isPlaying
         if (wasPlaying) pause()
@@ -216,8 +259,7 @@ class AudioPlayer(private val context: Context) {
         audioTrack?.flush()
         playheadPosition = newPosition
         
-        val totalMs = durationMs
-        onPlaybackPositionChanged(ms, totalMs)
+        onPlaybackPositionChanged(ms, durationMs)
         
         if (wasPlaying) play()
     }
