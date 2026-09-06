@@ -52,7 +52,9 @@ dependencies {
 
     // ONNX Runtime (sostituisce TensorFlow Lite: nessuna conversione TF richiesta,
     // usa modelli MDX-Net già pre-convertiti in formato .onnx dalla community UVR)
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.2")
+    // v1.23.0+ richiesto: allinea anche il wrapper JNI a pagine 16 KB
+    // (obbligatorio per Google Play su Android 15+ dal 1° novembre 2025)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
 
     // TarsosDSP rimosso: decodifica gestita con MediaExtractor/MediaCodec nativi
 
