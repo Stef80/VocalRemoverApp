@@ -33,6 +33,21 @@ DRM che bloccano la cattura, vedi vincoli sotto), rimuovere la voce, e
 riascoltare in seguito il risultato strumentale all'interno di
 VocalRemoverApp.
 
+**Questa è una funzione aggiuntiva, non un sostituto.** Il flusso attuale
+dell'app — caricare un file audio già presente sul device tramite il
+selettore file esistente ed elaborarlo con `VocalRemover.removeVocals` —
+**resta invariato e continua a essere disponibile**. Le due modalità
+coesistono e coprono due situazioni diverse:
+- il brano è già disponibile come file sul dispositivo → si carica
+  direttamente (flusso esistente, nessuna modifica);
+- il brano è disponibile solo "al volo", in riproduzione in un'altra app
+  (streaming, video online, ecc.) e non esiste come file scaricabile →
+  si registra dal vivo mentre suona (nuovo flusso di questa spec), per
+  poi elaborarlo esattamente con la stessa pipeline di rimozione voce.
+
+In UI questo si traduce in due punti di ingresso distinti e paralleli
+(vedi sezione UI), non in una sostituzione del selettore file esistente.
+
 ## Vincoli tecnici critici (invariati rispetto alla revisione 1, restano validi)
 
 1. **Molte app bloccano esplicitamente la cattura.** Da Android 10 (Q) in
@@ -120,36 +135,15 @@ SystemAudioCaptureService (Foreground Service, type=mediaProjection)
 
 ## Naming del file salvato
 
-Domanda: è possibile ottenere automaticamente il titolo del brano dalla
-app sorgente, invece di chiedere sempre all'utente di nominare il file a
-mano?
-
-**Sì, esiste un modo legittimo**: Android espone i metadati "now playing"
-(titolo, artista, album) tramite `MediaSessionManager` /
-`MediaController.getMetadata()`, la stessa API usata da widget "now
-playing", smartwatch e schermate di blocco. Per accedervi serve che
-l'utente conceda il permesso speciale **"Accesso alle notifiche"**
-(implementando un `NotificationListenerService`, requisito Android per
-leggere le sessioni multimediali attive di altre app) — è un permesso
-distinto da quello di cattura audio/MediaProjection, va richiesto a parte
-e spiegato chiaramente in UI (va concesso una tantum dalle impostazioni
-di sistema). Non è un aggiramento di alcuna protezione: sono metadati che
-l'app sorgente espone volontariamente per la visualizzazione (notifica,
-lock screen).
-
-**Comportamento proposto**:
-1. Se l'utente ha concesso l'accesso alle notifiche ed è disponibile una
-   sessione multimediale attiva con metadati (titolo + artista) al
-   momento dell'avvio della registrazione, il nome proposto è
-   `"<titolo> - <artista>"` (sanificato per caratteri non validi nel
-   filesystem), precompilato in una finestra di salvataggio.
-2. L'utente può sempre modificare il nome proposto prima di confermare
-   il salvataggio (mai un salvataggio "silenzioso" senza conferma).
-3. **Fallback su nome manuale** quando: permesso non concesso, nessuna
-   sessione attiva rilevata, metadati mancanti/vuoti, o l'utente ha
-   scelto di non usare questa funzione — in questi casi si propone un
-   nome generico basato su data/ora (es. `Registrazione_2026-09-12_1130`)
-   comunque modificabile dall'utente.
+Per mantenere la semplicità, niente rilevamento automatico del titolo dai
+metadati "now playing" della sorgente (avrebbe richiesto un permesso
+extra — "Accesso alle notifiche" — e una nuova componente
+`NotificationListenerService` solo per questo). **Il nome del file è
+sempre inserito manualmente dall'utente** in una finestra di salvataggio
+mostrata al termine dell'elaborazione, con un nome generico basato su
+data/ora precompilato come punto di partenza modificabile (es.
+`Registrazione_2026-09-12_1130`), coerente con l'assenza di editing dei
+nomi già presente altrove nell'app.
 
 ## Componenti
 
@@ -166,15 +160,6 @@ lock screen).
 - Gestisce lo stop pulito (`AudioRecord.release()`,
   `MediaProjection.stop()`, chiusura file, rimozione notifica).
 
-### `NowPlayingMetadataReader` (nuovo, opzionale/facoltativo)
-
-- `NotificationListenerService` + `MediaSessionManager.getActiveSessions()`
-  per leggere titolo/artista della sessione multimediale attiva al
-  momento dell'avvio registrazione.
-- Se il permesso non è concesso, la funzione restituisce semplicemente
-  "nessun metadato disponibile" (fallback nome manuale/generico) — non è
-  un requisito bloccante per usare la funzione di registrazione.
-
 ### Pipeline di elaborazione: **nessuna nuova classe**
 
 - Riusa integralmente `VocalRemover.removeVocals` (già esistente, già a
@@ -185,14 +170,18 @@ lock screen).
 
 ### UI (`MainActivity`, minimale)
 
-- Un pulsante "Registra da un'altra app": mostra l'elenco delle sessioni
-  audio attive (da `AudioManager.getActivePlaybackConfigurations()`),
-  l'utente sceglie la sorgente, poi avvia il consenso MediaProjection.
+- Il flusso esistente di caricamento file da storage **resta invariato e
+  visibile come oggi** (es. un pulsante "Carica file").
+- Si aggiunge un secondo pulsante, alla pari del primo, **"Registra da
+  un'altra app"**: mostra l'elenco delle sessioni audio attive (da
+  `AudioManager.getActivePlaybackConfigurations()`), l'utente sceglie la
+  sorgente, poi avvia il consenso MediaProjection.
 - Durante la registrazione: indicatore di stato + pulsante "Ferma e
   elabora".
 - Alla fine della registrazione: barra di progresso dell'elaborazione
-  (stesso `onProgress` già usato oggi), poi finestra di salvataggio con
-  nome precompilato (vedi sopra) ed editabile.
+  (stesso `onProgress` già usato oggi, condiviso con il flusso di
+  caricamento file), poi finestra di salvataggio con nome inserito
+  manualmente (vedi sopra).
 - Gestione esplicita dell'errore `onCaptureBlocked()`: messaggio tipo
   "Questa app non consente la registrazione audio (protezione del
   contenuto)".
@@ -235,21 +224,26 @@ lock screen).
   escluso, non negoziabile.
 - Riproduzione live/simultanea dello strumentale mentre la sorgente sta
   ancora suonando: esplicitamente abbandonata con questa revisione.
+- Nome file automatico dai metadati "now playing" (`MediaSessionManager`
+  + permesso "Accesso alle notifiche"): scartato per mantenere la
+  semplicità, il nome è sempre inserito manualmente dall'utente.
 - Testi sincronizzati (Musixmatch o simile) — resta il sotto-progetto 3,
   non affrontato qui.
 - Cattura da app di sistema privilegiate o cross-profilo utente.
+- Rimozione o modifica del flusso esistente di caricamento file da
+  storage: resta invariato, questa spec aggiunge solo un secondo punto di
+  ingresso parallelo.
 
 ## Nota sulle decisioni prese in autonomia
 
-Questa spec è stata scritta in una sessione senza un ciclo interattivo
-completo di approvazione (alcune domande sono state poste e risposte
-dall'utente nel corso della conversazione, ma non è stata effettuata una
-revisione formale riga-per-riga dell'intero documento). Prima di generare
-il piano di implementazione dettagliato (`writing-plans`), confermare che
-questa architettura "registra ora, elabora ed elenca dopo" rispecchi
-correttamente l'intento, in particolare:
-- l'assenza di riproduzione live è accettata come scelta definitiva;
-- la funzione di nome automatico dai metadati "now playing" è desiderata
-  come funzione opzionale (permesso extra "Accesso alle notifiche"), o si
-  preferisce ometterla e chiedere sempre il nome manualmente per
-  semplificare l'ambito.
+Questa spec riflette le decisioni prese esplicitamente dall'utente nel
+corso della conversazione:
+- passaggio da modalità live a "registra ora, elabora dopo";
+- nome file sempre manuale, niente rilevamento automatico da metadati;
+- il flusso di caricamento file esistente resta disponibile, la
+  registrazione da altra app è un'opzione aggiuntiva, non sostitutiva.
+
+Resta da confermare solo il punto tecnico non ancora deciso dall'utente:
+se procedere prima con lo spike di validazione ridotto (vedi sezione
+Testing) o passare direttamente al piano di implementazione completo
+accettando il rischio residuo sui vincoli 1-2.
