@@ -12,12 +12,12 @@
     <!-- Impedisce la sospensione CPU durante l'elaborazione -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Spike: cattura audio di sistema da un'altra app (MediaProjection) -->
+    <!-- Cattura audio di sistema da un'altra app tramite MediaProjection -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
-    <!-- Spike: visibilità pacchetti richiesta da Android 11+ per poter risolvere
+    <!-- Visibilità pacchetti richiesta da Android 11+ per poter risolvere
          l'UID delle app sorgente candidate tramite PackageManager.getApplicationInfo() -->
     <queries>
         <package android:name="com.android.chrome" />
@@ -52,7 +52,7 @@
         </activity>
 
         <service
-            android:name=".spike.CaptureSpikeService"
+            android:name=".capture.SystemAudioCaptureService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
 

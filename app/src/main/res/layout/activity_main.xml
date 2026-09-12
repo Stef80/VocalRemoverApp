@@ -153,7 +153,7 @@
         android:id="@+id/tvInfo"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="Modello: Spleeter 2-stems (TFLite)\nFFT: n=4096, hop=1024, SR=44100Hz"
+        android:text="Modello: Open-Unmix (ONNX)\nFFT: n=4096, hop=1024, SR=44100Hz"
         android:textSize="11sp"
         android:textColor="#AAAAAA"
         android:gravity="center"
@@ -162,9 +162,8 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="24dp" />
 
-    <!-- Spike throwaway: validazione cattura audio di sistema -->
     <EditText
-        android:id="@+id/etSpikePackageName"
+        android:id="@+id/etCapturePackageName"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:text="com.android.chrome"
@@ -175,25 +174,39 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="12dp" />
 
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnSpikeCapture"
+    <FrameLayout
+        android:id="@+id/captureButtonContainer"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="🧪 Spike: registra da un'altra app (10s)"
-        android:textSize="13sp"
-        app:layout_constraintTop_toBottomOf="@id/etSpikePackageName"
+        app:layout_constraintTop_toBottomOf="@id/etCapturePackageName"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginTop="8dp" />
+        android:layout_marginTop="8dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnStartCapture"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Registra audio dall'app sorgente"
+            android:textSize="13sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnStopCapture"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Ferma e elabora"
+            android:textSize="13sp"
+            android:visibility="gone" />
+    </FrameLayout>
 
     <TextView
-        android:id="@+id/tvSpikeOutcome"
+        android:id="@+id/tvCaptureStatus"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:text=""
         android:textSize="11sp"
         android:gravity="center"
-        app:layout_constraintTop_toBottomOf="@id/btnSpikeCapture"
+        app:layout_constraintTop_toBottomOf="@id/captureButtonContainer"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="8dp" />

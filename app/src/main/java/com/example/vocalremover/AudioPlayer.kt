@@ -8,6 +8,7 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.*
 import java.nio.ByteBuffer
@@ -38,6 +39,19 @@ class AudioPlayer(private val context: Context) {
 
     val isPlaying: Boolean get() = audioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING
     val isReady: Boolean get() = processedPcm != null
+
+    fun loadProcessedMono(monoPcm: FloatArray) {
+        check(Looper.myLooper() == Looper.getMainLooper()) {
+            "loadProcessedMono deve essere chiamato dal thread principale"
+        }
+
+        playbackJob?.cancel()
+        audioTrack?.stop()
+        audioTrack?.flush()
+        processedPcm = monoPcm
+        prepareAudioTrack()
+        onReady()
+    }
 
     suspend fun loadAndProcess(uri: Uri, remover: VocalRemover) = withContext(Dispatchers.IO) {
         try {
@@ -71,6 +85,14 @@ class AudioPlayer(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Errore elaborazione", e)
             withContext(Dispatchers.Main) { onError(e.message ?: "Errore sconosciuto") }
+        }
+    }
+
+    suspend fun loadSavedRecording(uri: Uri) = withContext(Dispatchers.IO) {
+        val monoPcm = decodeAudio(uri)?.downmix()
+            ?: throw IllegalStateException("Impossibile aprire la registrazione salvata")
+        withContext(Dispatchers.Main) {
+            loadProcessedMono(monoPcm)
         }
     }
 

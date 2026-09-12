@@ -1,4 +1,4 @@
-package com.example.vocalremover.spike
+package com.example.vocalremover.capture
 
 /**
  * Rileva se un buffer di campioni PCM float è "silenzio" (RMS sotto

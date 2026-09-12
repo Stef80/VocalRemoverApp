@@ -1,4 +1,4 @@
-package com.example.vocalremover.spike
+package com.example.vocalremover.capture
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

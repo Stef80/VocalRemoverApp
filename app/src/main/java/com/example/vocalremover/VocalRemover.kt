@@ -5,7 +5,9 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.ensureActive
 import java.nio.FloatBuffer
+import kotlin.coroutines.coroutineContext
 
 data class StereoPcm(
     val left: FloatArray,
@@ -84,6 +86,7 @@ class VocalRemover(context: Context) {
 
         var frameOffset = 0
         while (frameOffset < totalFrames) {
+            coroutineContext.ensureActive()
             val blockEnd = minOf(frameOffset + BLOCK_FRAMES, totalFrames)
             val blockFrameCount = blockEnd - frameOffset
 
@@ -99,6 +102,7 @@ class VocalRemover(context: Context) {
 
             var sub = 0
             while (sub < blockFrameCount) {
+                coroutineContext.ensureActive()
                 val subEnd = minOf(sub + CHUNK_FRAMES, blockFrameCount)
                 val realChunkSize = subEnd - sub
 
