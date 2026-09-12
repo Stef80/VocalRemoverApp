@@ -1,5 +1,14 @@
 # Copilot Instructions for VocalRemoverApp
 
+## Git commits
+
+**Never run `git commit` (or otherwise commit) on the user's behalf**, in this
+repository, regardless of how routine or low-risk the change seems (docs,
+specs, plans, generated code, etc.). Stage/prepare changes and describe what
+would be committed and why, but leave the actual commit action to the user to
+run themselves. This applies even if earlier turns in the same session show
+commits made automatically — that behavior is retired.
+
 ## Model file setup (required before build)
 
 `app/src/main/assets/vocal_remover.onnx` (~108MB, Open-Unmix UMX-L) is **not tracked in git** (excluded via `.gitignore`, `*.onnx`) because it exceeds GitHub's 100MB file size limit. It must be downloaded manually and placed at that exact path before building — see `README.md` for the download link and steps. Do not attempt to `git add -f` this file; it will be rejected by GitHub's push size check.

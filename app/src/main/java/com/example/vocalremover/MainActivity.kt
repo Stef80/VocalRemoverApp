@@ -1,21 +1,32 @@
 package com.example.vocalremover
 
 import android.Manifest
+import android.app.Activity
+import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.vocalremover.databinding.ActivityMainBinding
+import com.example.vocalremover.spike.CaptureSpikeService
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        private const val TAG = "CaptureSpike"
+    }
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var vocalRemover: VocalRemover
@@ -38,6 +49,39 @@ class MainActivity : AppCompatActivity() {
         else Toast.makeText(this, "Permesso storage necessario", Toast.LENGTH_SHORT).show()
     }
 
+    // ── Spike: cattura audio di sistema ──────────────────────────────────────
+    private var pendingSpikeTargetUid: Int = -1
+
+    private val requestRecordAudioLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) launchSpikeMediaProjectionConsent()
+        else Toast.makeText(this, "Permesso microfono necessario per lo spike", Toast.LENGTH_SHORT).show()
+    }
+
+    private val spikeMediaProjectionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        Log.d(TAG, "spikeMediaProjectionLauncher: resultCode=${result.resultCode}, data=${result.data}, targetUid=$pendingSpikeTargetUid")
+        if (result.resultCode == Activity.RESULT_OK && result.data != null && pendingSpikeTargetUid >= 0) {
+            val serviceIntent = Intent(this, CaptureSpikeService::class.java).apply {
+                putExtra(CaptureSpikeService.EXTRA_RESULT_CODE, result.resultCode)
+                putExtra(CaptureSpikeService.EXTRA_RESULT_DATA, result.data)
+                putExtra(CaptureSpikeService.EXTRA_TARGET_UID, pendingSpikeTargetUid)
+            }
+            Log.d(TAG, "Avvio CaptureSpikeService con uid=$pendingSpikeTargetUid")
+            startForegroundService(serviceIntent)
+            binding.tvSpikeOutcome.text = "Cattura avviata, attendi ~10s..."
+            binding.root.postDelayed({
+                Log.d(TAG, "Esito finale letto in UI: ${CaptureSpikeService.lastOutcome}")
+                binding.tvSpikeOutcome.text = CaptureSpikeService.lastOutcome
+            }, 11_000L)
+        } else {
+            Log.w(TAG, "Consenso MediaProjection negato o dati mancanti")
+            Toast.makeText(this, "Consenso alla cattura negato", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,6 +94,11 @@ class MainActivity : AppCompatActivity() {
         setupUi()
         setupPlayerCallbacks()
         setPlayerEnabled(false)
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            binding.btnSpikeCapture.isEnabled = false
+            binding.tvSpikeOutcome.text = "Spike non disponibile: richiede Android 10 (API 29) o superiore"
+        }
     }
 
     override fun onDestroy() {
@@ -89,6 +138,8 @@ class MainActivity : AppCompatActivity() {
                 audioPlayer.seekTo(sb.progress)
             }
         })
+
+        binding.btnSpikeCapture.setOnClickListener { startSpikeCapture() }
     }
 
     private fun setupPlayerCallbacks() {
@@ -163,6 +214,54 @@ class MainActivity : AppCompatActivity() {
             else ->
                 requestPermissionLauncher.launch(permission)
         }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun startSpikeCapture() {
+        val packageName = binding.etSpikePackageName.text.toString().trim()
+        Log.d(TAG, "startSpikeCapture: pulsante premuto, packageName='$packageName'")
+        if (packageName.isEmpty()) {
+            Toast.makeText(this, "Inserisci un nome pacchetto", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val uid = try {
+            packageManager.getApplicationInfo(packageName, ApplicationInfo.FLAG_INSTALLED).uid
+        } catch (e: Exception) {
+            Log.e(TAG, "Impossibile risolvere il pacchetto '$packageName'", e)
+            Toast.makeText(this, "App '$packageName' non trovata: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        Log.d(TAG, "UID risolto per '$packageName' = $uid")
+        pendingSpikeTargetUid = uid
+
+        val recordAudioGranted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        Log.d(TAG, "Permesso RECORD_AUDIO già concesso: $recordAudioGranted")
+
+        if (recordAudioGranted) launchSpikeMediaProjectionConsent()
+        else requestRecordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    private fun launchSpikeMediaProjectionConsent() {
+        Log.d(TAG, "Richiesta consenso MediaProjection all'utente")
+        val projectionManager =
+            getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+
+        // Da Android 14 (API 34) si può forzare la modalità "Schermo intero" nel
+        // dialogo di consenso, evitando che l'utente possa scegliere "Un'unica app"
+        // (modalità che, verificato con lo spike, non produce una cattura audio
+        // funzionante su questi device).
+        val captureIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            Log.d(TAG, "Forzo consenso 'Schermo intero' via MediaProjectionConfig (API ${Build.VERSION.SDK_INT})")
+            projectionManager.createScreenCaptureIntent(
+                android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay()
+            )
+        } else {
+            Log.w(TAG, "API < 34: impossibile forzare 'Schermo intero', l'utente potrebbe scegliere 'Un'unica app' (non funzionante)")
+            projectionManager.createScreenCaptureIntent()
+        }
+        spikeMediaProjectionLauncher.launch(captureIntent)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

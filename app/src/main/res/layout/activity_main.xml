@@ -157,9 +157,45 @@
         android:textSize="11sp"
         android:textColor="#AAAAAA"
         android:gravity="center"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/layoutControls"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginBottom="16dp" />
+        android:layout_marginTop="24dp" />
+
+    <!-- Spike throwaway: validazione cattura audio di sistema -->
+    <EditText
+        android:id="@+id/etSpikePackageName"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="com.android.chrome"
+        android:hint="Nome pacchetto sorgente (es. com.android.chrome)"
+        android:textSize="12sp"
+        app:layout_constraintTop_toBottomOf="@id/tvInfo"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="12dp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnSpikeCapture"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="🧪 Spike: registra da un'altra app (10s)"
+        android:textSize="13sp"
+        app:layout_constraintTop_toBottomOf="@id/etSpikePackageName"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="8dp" />
+
+    <TextView
+        android:id="@+id/tvSpikeOutcome"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="11sp"
+        android:gravity="center"
+        app:layout_constraintTop_toBottomOf="@id/btnSpikeCapture"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="8dp" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -12,6 +12,22 @@
     <!-- Impedisce la sospensione CPU durante l'elaborazione -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Spike: cattura audio di sistema da un'altra app (MediaProjection) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <!-- Spike: visibilità pacchetti richiesta da Android 11+ per poter risolvere
+         l'UID delle app sorgente candidate tramite PackageManager.getApplicationInfo() -->
+    <queries>
+        <package android:name="com.android.chrome" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.spotify.music" />
+        <package android:name="com.opera.browser" />
+        <package android:name="com.heytap.music" />
+        <package android:name="com.coloros.video" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:largeHeap="true"
@@ -34,6 +50,11 @@
                 <data android:mimeType="audio/*" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".spike.CaptureSpikeService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
 
     </application>
 </manifest>
