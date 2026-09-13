@@ -23,12 +23,12 @@ class AudioPlayer(private val context: Context) {
     companion object {
         private const val TAG = "AudioPlayer"
         private const val SAMPLE_RATE = 44100
-        private const val CHANNELS = AudioFormat.CHANNEL_OUT_MONO
+        private const val CHANNELS = AudioFormat.CHANNEL_OUT_STEREO
         private const val ENCODING = AudioFormat.ENCODING_PCM_FLOAT
     }
 
     private var audioTrack: AudioTrack? = null
-    private var processedPcm: FloatArray? = null
+    private var processedPcm: StereoPcm? = null
     private var playbackJob: Job? = null
     private var playheadPosition = 0 // frames
 
@@ -40,15 +40,15 @@ class AudioPlayer(private val context: Context) {
     val isPlaying: Boolean get() = audioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING
     val isReady: Boolean get() = processedPcm != null
 
-    fun loadProcessedMono(monoPcm: FloatArray) {
+    fun loadProcessedStereo(stereoPcm: StereoPcm) {
         check(Looper.myLooper() == Looper.getMainLooper()) {
-            "loadProcessedMono deve essere chiamato dal thread principale"
+            "loadProcessedStereo deve essere chiamato dal thread principale"
         }
 
         playbackJob?.cancel()
         audioTrack?.stop()
         audioTrack?.flush()
-        processedPcm = monoPcm
+        processedPcm = stereoPcm
         prepareAudioTrack()
         onReady()
     }
@@ -71,9 +71,7 @@ class AudioPlayer(private val context: Context) {
                 return@withContext
             }
 
-            // A questo punto il mix originale non è più referenziato e può essere rimosso dal GC.
-            // Facciamo il downmix strumentale e liberiamo anche la versione stereo dello strumentale.
-            processedPcm = instrumental.downmix()
+            processedPcm = instrumental
             
             System.gc() // Suggerimento per ripulire mix originale e instrumental stereo
 
@@ -89,10 +87,10 @@ class AudioPlayer(private val context: Context) {
     }
 
     suspend fun loadSavedRecording(uri: Uri) = withContext(Dispatchers.IO) {
-        val monoPcm = decodeAudio(uri)?.downmix()
+        val stereoPcm = decodeAudio(uri)
             ?: throw IllegalStateException("Impossibile aprire la registrazione salvata")
         withContext(Dispatchers.Main) {
-            loadProcessedMono(monoPcm)
+            loadProcessedStereo(stereoPcm)
         }
     }
 
@@ -232,17 +230,29 @@ class AudioPlayer(private val context: Context) {
         playbackJob = CoroutineScope(Dispatchers.IO).launch {
             val totalFrames = pcm.size
             val totalMs = (totalFrames * 1000L / SAMPLE_RATE).toInt()
-            
-            val chunkSize = 4096 
+            val chunkSize = 4096
+            val interleaved = FloatArray(chunkSize * 2)
             
             while (isActive && playheadPosition < totalFrames && track.playState != AudioTrack.PLAYSTATE_STOPPED) {
                 if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
                     val remaining = totalFrames - playheadPosition
                     val toWrite = minOf(remaining, chunkSize)
-                    
-                    val written = track.write(pcm, playheadPosition, toWrite, AudioTrack.WRITE_BLOCKING)
+
+                    for (index in 0 until toWrite) {
+                        val frameIndex = playheadPosition + index
+                        val outIndex = index * 2
+                        interleaved[outIndex] = pcm.left[frameIndex]
+                        interleaved[outIndex + 1] = pcm.right[frameIndex]
+                    }
+
+                    val written = track.write(
+                        interleaved,
+                        0,
+                        toWrite * 2,
+                        AudioTrack.WRITE_BLOCKING
+                    )
                     if (written > 0) {
-                        playheadPosition += written
+                        playheadPosition += written / 2
                         val currentMs = (playheadPosition * 1000L / SAMPLE_RATE).toInt()
                         withContext(Dispatchers.Main) {
                             onPlaybackPositionChanged(currentMs, totalMs)

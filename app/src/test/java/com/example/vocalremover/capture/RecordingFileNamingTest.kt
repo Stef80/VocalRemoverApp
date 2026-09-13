@@ -48,4 +48,12 @@ class RecordingFileNamingTest {
             TimeZone.setDefault(previousTimeZone)
         }
     }
+
+    @Test
+    fun `rawCaptureName appends capture suffix before extension`() {
+        assertEquals(
+            "My Song_capture",
+            RecordingFileNaming.rawCaptureName("My Song")
+        )
+    }
 }

@@ -26,6 +26,7 @@
         <package android:name="com.opera.browser" />
         <package android:name="com.heytap.music" />
         <package android:name="com.coloros.video" />
+        <package android:name="com.amazon.mp3" />
     </queries>
 
     <application

@@ -14,7 +14,10 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
 import android.widget.EditText
+import android.widget.Filter
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -46,6 +49,9 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val STATE_PENDING_CAPTURE_TARGET_PACKAGE =
             "pending_capture_target_package"
+        private const val PREFS_CAPTURE_PACKAGE_PICKER = "capture_package_picker"
+        private const val KEY_RECENT_CAPTURE_PACKAGES = "recent_capture_packages"
+        private const val ANDROID_NAMESPACE = "http://schemas.android.com/apk/res/android"
     }
 
     private enum class CaptureUiState {
@@ -242,6 +248,8 @@ class MainActivity : AppCompatActivity() {
 
     // ── UI setup ─────────────────────────────────────────────────────────────
     private fun setupUi() {
+        setupCapturePackageSuggestions()
+
         binding.btnPickFile.setOnClickListener { requestStoragePermissionAndPick() }
         binding.btnStartCapture.setOnClickListener { startCapture() }
         binding.btnStopCapture.setOnClickListener { stopCapture() }
@@ -285,6 +293,115 @@ class MainActivity : AppCompatActivity() {
                 captureInstructions()
             )
         }
+    }
+
+    private fun setupCapturePackageSuggestions() {
+        val recentPackages = readRecentCapturePackages()
+        val candidatePackages = readCaptureCandidatePackagesFromManifest()
+
+        // Solo i pacchetti dichiarati in <queries> nel manifest sono risolvibili
+        // da PackageManager su Android 11+; per gli altri getApplicationInfo
+        // lancia NameNotFoundException anche se installati.
+        val candidates = candidatePackages
+            .mapNotNull { packageName ->
+                val appInfo = try {
+                    packageManager.getApplicationInfo(packageName, ApplicationInfo.FLAG_INSTALLED)
+                } catch (_: PackageManager.NameNotFoundException) {
+                    null
+                }
+                appInfo?.takeIf { it.enabled }?.let { packageName to it }
+            }
+            .associate { (packageName, appInfo) ->
+                val label = packageManager.getApplicationLabel(appInfo)?.toString()?.trim()
+                val displayText = when {
+                    label.isNullOrBlank() -> packageName
+                    packageName == label -> packageName
+                    else -> "$label ($packageName)"
+                }
+                packageName to displayText
+            }
+
+        val orderedSuggestions = recentPackages
+            .filter { it in candidates }
+            .plus(candidates.keys.filter { it !in recentPackages }.sortedBy { candidates[it]?.lowercase() ?: it.lowercase() })
+            .distinct()
+            .mapNotNull { candidates[it] }
+
+        val autoCompleteView = binding.etCapturePackageName as AutoCompleteTextView
+        val adapter = ContainsFilterAdapter(this, orderedSuggestions, autoCompleteView)
+        autoCompleteView.threshold = 0
+        autoCompleteView.setAdapter(adapter)
+        autoCompleteView.setOnItemClickListener { _, _, position, _ ->
+            val selectedText = adapter.getItem(position)?.toString() ?: return@setOnItemClickListener
+            val packageName = selectedText.substringAfterLast("(").trimEnd(')')
+            if (packageName.isNotBlank()) {
+                autoCompleteView.setText(packageName)
+                autoCompleteView.setSelection(packageName.length)
+                rememberCapturePackage(packageName)
+            }
+        }
+        autoCompleteView.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) autoCompleteView.showDropDown()
+        }
+        autoCompleteView.setOnClickListener { autoCompleteView.showDropDown() }
+
+    }
+
+    /**
+     * Legge i pacchetti dichiarati in <queries><package android:name="..."/></queries>
+     * direttamente dal proprio AndroidManifest.xml compilato: è l'unica fonte
+     * di verità, non esiste una lista duplicata in Kotlin. Se il parsing
+     * dovesse fallire, ritorna vuoto e il picker resta senza suggerimenti
+     * (l'utente può comunque scrivere il package a mano).
+     */
+    private fun readCaptureCandidatePackagesFromManifest(): List<String> {
+        var parser: android.content.res.XmlResourceParser? = null
+        return try {
+            parser = assets.openXmlResourceParser("AndroidManifest.xml")
+            val packages = mutableListOf<String>()
+            var insideQueries = false
+            var eventType = parser.eventType
+            while (eventType != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                when (eventType) {
+                    org.xmlpull.v1.XmlPullParser.START_TAG -> when (parser.name) {
+                        "queries" -> insideQueries = true
+                        "package" -> if (insideQueries) {
+                            parser.getAttributeValue(ANDROID_NAMESPACE, "name")?.let(packages::add)
+                        }
+                    }
+                    org.xmlpull.v1.XmlPullParser.END_TAG -> if (parser.name == "queries") {
+                        insideQueries = false
+                    }
+                }
+                eventType = parser.next()
+            }
+            packages
+        } catch (_: Exception) {
+            emptyList()
+        } finally {
+            parser?.close()
+        }
+    }
+
+    private fun readRecentCapturePackages(): List<String> {
+        val prefs = getSharedPreferences(PREFS_CAPTURE_PACKAGE_PICKER, MODE_PRIVATE)
+        return prefs.getString(KEY_RECENT_CAPTURE_PACKAGES, "")
+            ?.split('|')
+            ?.filter { it.isNotBlank() }
+            ?.distinct()
+            ?: emptyList()
+    }
+
+    private fun rememberCapturePackage(packageName: String) {
+        val normalized = packageName.trim()
+        if (normalized.isEmpty()) return
+
+        val prefs = getSharedPreferences(PREFS_CAPTURE_PACKAGE_PICKER, MODE_PRIVATE)
+        val recent = readRecentCapturePackages()
+            .filter { it != normalized }
+            .toMutableList()
+        recent.add(0, normalized)
+        prefs.edit().putString(KEY_RECENT_CAPTURE_PACKAGES, recent.take(10).joinToString("|")).apply()
     }
 
     private fun setupPlayerCallbacks() {
@@ -359,6 +476,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        rememberCapturePackage(packageName)
         pendingCaptureTargetPackageName = packageName
         setCaptureUiState(
             CaptureUiState.AWAITING_CONSENT,
@@ -487,6 +605,13 @@ class MainActivity : AppCompatActivity() {
             try {
                 val instrumental = withContext(Dispatchers.IO) {
                     val stereoPcm = WavFileReader.readStereoPcm(temporaryWav)
+                    runCatching {
+                        RecordingSaver.saveStereoCaptureAsWav(
+                            this@MainActivity,
+                            stereoPcm,
+                            RecordingFileNaming.rawCaptureName(RecordingFileNaming.defaultName())
+                        )
+                    }
                     vocalRemover.removeVocals(stereoPcm) { progress ->
                         if (!isDestroyed) {
                             runOnUiThread {
@@ -564,10 +689,9 @@ class MainActivity : AppCompatActivity() {
         captureProcessingJob = lifecycleScope.launch {
             try {
                 val monoPcm = withContext(Dispatchers.IO) {
-                    val mono = instrumental.downmix()
-                    val savedUri = RecordingSaver.saveMonoPcmAsWav(
+                    val savedUri = RecordingSaver.saveProcessedStereoAsWav(
                         this@MainActivity,
-                        mono,
+                        instrumental,
                         displayName
                     )
                     check(
@@ -577,11 +701,11 @@ class MainActivity : AppCompatActivity() {
                             savedUri.toString()
                         )
                     ) { "Impossibile registrare il salvataggio della cattura" }
-                    mono
+                    instrumental
                 }
                 ensureActive()
                 binding.tvFileName.text = "$displayName.wav"
-                audioPlayer.loadProcessedMono(monoPcm)
+                audioPlayer.loadProcessedStereo(monoPcm)
                 ensureActive()
                 completeSavedCaptureHandoff(resultId)
             } catch (cancelled: CancellationException) {
@@ -845,4 +969,48 @@ class MainActivity : AppCompatActivity() {
         val seconds = TimeUnit.MILLISECONDS.toSeconds(ms.toLong()) % 60
         return "%02d:%02d".format(minutes, seconds)
     }
+}
+
+/**
+ * ArrayAdapter con filtro "contains" (case-insensitive) invece del default
+ * "startsWith" per parola. Mantiene sempre l'elenco completo originale, così
+ * il menu a tendina può essere riaperto e rifiltrato ripetutamente (il
+ * ArrayAdapter standard perde il riferimento alla lista completa dopo la
+ * prima selezione/filtraggio).
+ */
+private class ContainsFilterAdapter(
+    context: Context,
+    private val allItems: List<String>,
+    private val autoCompleteView: AutoCompleteTextView
+) : ArrayAdapter<String>(context, android.R.layout.simple_dropdown_item_1line, allItems.toMutableList()) {
+
+    private val containsFilter = object : Filter() {
+        override fun performFiltering(constraint: CharSequence?): FilterResults {
+            val query = constraint?.toString()?.trim().orEmpty()
+            val filtered = if (query.isEmpty()) {
+                allItems
+            } else {
+                allItems.filter { it.contains(query, ignoreCase = true) }
+            }
+            return FilterResults().apply {
+                values = filtered
+                count = filtered.size
+            }
+        }
+
+        override fun publishResults(constraint: CharSequence?, results: FilterResults?) {
+            @Suppress("UNCHECKED_CAST")
+            val filtered = results?.values as? List<String> ?: emptyList()
+            clear()
+            addAll(filtered)
+            notifyDataSetChanged()
+            if (filtered.isNotEmpty() && autoCompleteView.hasFocus()) {
+                autoCompleteView.post { autoCompleteView.showDropDown() }
+            } else {
+                autoCompleteView.dismissDropDown()
+            }
+        }
+    }
+
+    override fun getFilter(): Filter = containsFilter
 }

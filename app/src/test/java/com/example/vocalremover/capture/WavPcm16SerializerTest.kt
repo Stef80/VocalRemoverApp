@@ -44,6 +44,61 @@ class WavPcm16SerializerTest {
         )
     }
 
+    @Test
+    fun `serializes stereo pcm without altering channel order`() {
+        val wav = WavPcm16StereoSerializer.toWavBytes(
+            left = floatArrayOf(1f, 0f),
+            right = floatArrayOf(0f, -1f)
+        )
+        val header = ByteBuffer.wrap(wav).order(ByteOrder.LITTLE_ENDIAN)
+
+        assertEquals("RIFF", header.readFourCc())
+        assertEquals(44, header.int)
+        assertEquals("WAVE", header.readFourCc())
+        assertEquals("fmt ", header.readFourCc())
+        assertEquals(16, header.int)
+        assertEquals(1, header.short.toInt())
+        header.position(22)
+        assertEquals(2, header.short.toInt())
+        assertEquals(44_100, header.int)
+        assertEquals(176_400, header.int)
+        assertEquals(4, header.short.toInt())
+        assertEquals(16, header.short.toInt())
+        assertEquals("data", header.readFourCc())
+        assertEquals(8, header.int)
+
+        val samples = ByteBuffer.wrap(wav, 44, wav.size - 44).order(ByteOrder.LITTLE_ENDIAN)
+        val encoded = ShortArray(4) { samples.short }
+        assertArrayEquals(
+            shortArrayOf(32_767, 0, 0, -32_768),
+            encoded
+        )
+    }
+
+    @Test
+    fun `save serializer for processed output is stereo`() {
+        val wav = WavPcm16ProcessedSerializer.toWavBytes(
+            left = floatArrayOf(0.25f, -0.25f),
+            right = floatArrayOf(-0.5f, 0.5f)
+        )
+        val header = ByteBuffer.wrap(wav).order(ByteOrder.LITTLE_ENDIAN)
+
+        assertEquals("RIFF", header.readFourCc())
+        assertEquals(44, header.int)
+        assertEquals("WAVE", header.readFourCc())
+        assertEquals("fmt ", header.readFourCc())
+        assertEquals(16, header.int)
+        assertEquals(1, header.short.toInt())
+        header.position(22)
+        assertEquals(2, header.short.toInt())
+        assertEquals(44_100, header.int)
+        assertEquals(176_400, header.int)
+        assertEquals(4, header.short.toInt())
+        assertEquals(16, header.short.toInt())
+        assertEquals("data", header.readFourCc())
+        assertEquals(8, header.int)
+    }
+
     private fun ByteBuffer.readFourCc(): String =
         ByteArray(4).also(::get).toString(Charsets.US_ASCII)
 }

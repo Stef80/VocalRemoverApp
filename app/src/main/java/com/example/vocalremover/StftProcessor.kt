@@ -91,8 +91,15 @@ class StftProcessor(
         Pair(stftRe, stftIm)
     }
 
-    /** Numero totale di frame STFT per un segnale di lunghezza [signalLength]. */
-    fun frameCount(signalLength: Int): Int = (signalLength - nFft) / hopLength + 1
+    /**
+     * Numero totale di frame STFT per un segnale di lunghezza [signalLength], includendo
+     * anche l'ultimo frame parziale che verrà completato con zero-padding.
+     */
+    fun frameCount(signalLength: Int): Int {
+        if (signalLength <= 0) return 0
+        if (signalLength <= nFft) return 1
+        return ((signalLength - nFft + hopLength - 1) / hopLength) + 1
+    }
 
     /**
      * Calcola la STFT solo per l'intervallo di frame [startFrame, startFrame+frameCount).

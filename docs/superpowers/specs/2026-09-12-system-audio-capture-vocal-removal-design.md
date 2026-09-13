@@ -5,30 +5,7 @@ Sotto-progetto: 2 di 3 (cattura audio di sistema), come già anticipato e
 lasciato fuori scope in `2026-07-26-realtime-vocal-removal-design.md`
 (sotto-progetto 1, streaming di un file caricato nell'app stessa).
 
-> **STATO: VALIDATO CON RISERVA (12 settembre 2026, aggiornato).** Il primo
-> giro di test (consenso in modalità "Un'unica app") aveva dato esito
-> negativo su 2 device, facendo pensare a un bug di piattaforma universale.
-> **Retest con il consenso in modalità "Schermo intero" (invece di "Un'unica
-> app"): la cattura funziona correttamente** con sorgenti che non
-> impongono restrizioni (YouTube nativa, Chrome). La causa del fallimento
-> iniziale era quindi legata alla modalità di consenso per-singola-app, non
-> un bug irrisolvibile della piattaforma. **Vincolo emerso e confermato
-> intenzionale**: con sorgenti che impostano esplicitamente
-> `ALLOW_CAPTURE_BY_NONE` per protezione dei contenuti (es. Spotify), la
-> cattura resta bloccata — comportamento corretto e previsto, non un bug:
-> non va aggirato (vedi "Fuori scope"). Il sotto-progetto può quindi
-> procedere verso l'implementazione completa, con l'accortezza che la UI
-> **Aggiornamento**: da Android 14 (API 34), è possibile **forzare** la
-> modalità "Schermo intero" via codice con
-> `MediaProjectionConfig.createConfigForDefaultDisplay()` passato a
-> `createScreenCaptureIntent()`, eliminando del tutto la scelta "Un'unica
-> app" dal dialogo di sistema (implementato nello spike). Su API 29-33
-> questa configurazione non esiste: il dialogo mostra ancora la scelta
-> manuale e l'utente deve selezionare "Schermo intero" da sé (l'app potrà
-> solo istruirlo tramite testo in UI, senza poterla forzare).
-> dovrà guidare l'utente a scegliere "Schermo intero" nel dialogo di
-> sistema (non esiste un modo per l'app di forzare questa scelta
-> programmaticamente).
+> **STATO: IMPLEMENTATO (13 settembre 2026).** La funzionalità di produzione per la cattura dell'audio di sistema, elaborazione differita con VocalRemover, salvataggio MediaStore e riproduzione è stata implementata e verificata con test unitari e compilazione.
 
 ## Storia della revisione
 

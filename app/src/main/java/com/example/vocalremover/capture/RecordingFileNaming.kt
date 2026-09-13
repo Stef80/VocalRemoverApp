@@ -33,4 +33,6 @@ object RecordingFileNaming {
         val formatter = SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.US)
         return "${FALLBACK_NAME}_${formatter.format(Date(timestampMs))}"
     }
+
+    fun rawCaptureName(displayName: String): String = "${sanitize(displayName)}_capture"
 }

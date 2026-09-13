@@ -33,6 +33,26 @@ class WavFileReaderTest {
     }
 
     @Test
+    fun `reads a processed stereo wav saved by serializer`() {
+        withTestFile("processed_stereo.wav") { file ->
+            file.writeBytes(
+                WavPcm16ProcessedSerializer.toWavBytes(
+                    left = floatArrayOf(0.25f, -0.25f),
+                    right = floatArrayOf(-0.5f, 0.5f)
+                )
+            )
+
+            val info = WavFileReader.readInfo(file)
+            assertEquals(44100, info.sampleRate)
+            assertEquals(2, info.channelCount)
+
+            val stereoPcm = WavFileReader.readStereoPcm(file)
+            assertArrayEquals(floatArrayOf(8191f / 32768f, -8191f / 32768f), stereoPcm.left, 1e-6f)
+            assertArrayEquals(floatArrayOf(-16383f / 32768f, 16383f / 32768f), stereoPcm.right, 1e-6f)
+        }
+    }
+
+    @Test
     fun `rejects mono wav files`() {
         withTestFile("mono.wav") { file ->
             writeMonoWav(file)
