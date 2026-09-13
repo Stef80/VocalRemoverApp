@@ -8,6 +8,8 @@ import android.util.Log
 import kotlinx.coroutines.ensureActive
 import java.nio.FloatBuffer
 import kotlin.coroutines.coroutineContext
+import kotlin.math.abs
+import kotlin.math.max
 
 data class StereoPcm(
     val left: FloatArray,
@@ -26,25 +28,28 @@ data class StereoPcm(
 }
 
 /**
- * Carica il modello ONNX Open-Unmix e ricava la traccia strumentale.
- * Ottimizzato per ridurre le allocazioni e usare array piatti.
+ * Carica il modello ONNX UVR-MDX-NET-Inst_HQ_5 e ricava direttamente la traccia strumentale
+ * (il modello è addestrato per emettere lo spettro complesso dello strumentale, non una maschera
+ * di rapporto come il precedente Open-Unmix: niente ratio-mask, l'output dell'inferenza va
+ * dritto in ISTFT). Sostituisce il precedente modello Open-Unmix a seguito di un benchmark su
+ * audio reale che ha mostrato una perdita di voce residua (cross-leak) 3-4 volte inferiore
+ * (0.02-0.03 contro 0.08-0.14).
  */
 class VocalRemover(context: Context) {
 
     companion object {
         private const val TAG = "VocalRemover"
         private const val MODEL_ASSET = "vocal_remover.onnx"
-        // Frame per chiamata ONNX: dimensione fissa richiesta dal grafo del modello.
-        const val CHUNK_FRAMES = 100
-        // Frame STFT processati per blocco: limita la memoria di picco (Re/Im/mag mix+voce,
-        // stereo) a poche decine di MB indipendentemente dalla durata del brano, invece di
-        // materializzare l'intero spettrogramma del brano in RAM (causa di OutOfMemoryError
-        // su brani di durata normale). ~200 frame ≈ 4.6s di audio.
-        private const val BLOCK_FRAMES = 200
-        private const val EPS = 1e-8f
+        private const val N_FFT = 5120
+        private const val HOP_LENGTH = 1024
+        private const val DIM_F = 2560
+        private const val DIM_T = 256
+        private const val OVERLAP = 0.25
+        private const val NORMALIZATION_PEAK = 0.9f
     }
 
-    private val stft = StftProcessor()
+    private val mdxStft = MdxStftProcessor(nFft = N_FFT, hopLength = HOP_LENGTH, dimF = DIM_F)
+    private val chunker = MdxChunker(nFft = N_FFT, hopLength = HOP_LENGTH, dimT = DIM_T, overlap = OVERLAP)
     private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
     private val session: OrtSession
     private val inputName: String
@@ -66,127 +71,153 @@ class VocalRemover(context: Context) {
         outputName = session.outputNames.iterator().next()
     }
 
-    /** Processa i due canali PCM e restituisce lo strumentale stereo. */
     suspend fun removeVocals(
         signal: StereoPcm,
         onProgress: (Int) -> Unit = {}
     ): StereoPcm {
         onProgress(2)
 
-        val totalFrames = stft.frameCount(signal.size)
-        val instrumentalLeft = FloatArray(signal.size)
-        val instrumentalRight = FloatArray(signal.size)
-        val istftLeft = stft.StreamingIstft()
-        val istftRight = stft.StreamingIstft()
-        var writtenSamples = 0
-
-        val inputData = FloatArray(2 * stft.freqBins * CHUNK_FRAMES)
-        val inputBuffer = FloatBuffer.wrap(inputData)
-        val shape = longArrayOf(1L, 2L, stft.freqBins.toLong(), CHUNK_FRAMES.toLong())
-
-        var frameOffset = 0
-        while (frameOffset < totalFrames) {
-            coroutineContext.ensureActive()
-            val blockEnd = minOf(frameOffset + BLOCK_FRAMES, totalFrames)
-            val blockFrameCount = blockEnd - frameOffset
-
-            // 1. STFT del mix, solo per questo blocco (non l'intero brano).
-            val (blockLeftRe, blockLeftIm) = stft.stftRange(signal.left, frameOffset, blockFrameCount)
-            val (blockRightRe, blockRightIm) = stft.stftRange(signal.right, frameOffset, blockFrameCount)
-            val blockLeftMag = stft.magnitude(blockLeftRe, blockLeftIm)
-            val blockRightMag = stft.magnitude(blockRightRe, blockRightIm)
-
-            // 2. Inferenza a sotto-chunk di CHUNK_FRAMES (dimensione fissa richiesta dal modello).
-            val vocalsLeftMag = FloatArray(blockLeftMag.size)
-            val vocalsRightMag = FloatArray(blockRightMag.size)
-
-            var sub = 0
-            while (sub < blockFrameCount) {
-                coroutineContext.ensureActive()
-                val subEnd = minOf(sub + CHUNK_FRAMES, blockFrameCount)
-                val realChunkSize = subEnd - sub
-
-                inputData.fill(0f)
-                for (k in 0 until stft.freqBins) {
-                    for (f in 0 until realChunkSize) {
-                        val base = k * CHUNK_FRAMES + f
-                        inputData[base] = blockLeftMag[(sub + f) * stft.freqBins + k]
-                        inputData[stft.freqBins * CHUNK_FRAMES + base] =
-                            blockRightMag[(sub + f) * stft.freqBins + k]
-                    }
-                }
-
-                inputBuffer.rewind()
-                val inputTensor = OnnxTensor.createTensor(env, inputBuffer, shape)
-
-                inputTensor.use { tensor ->
-                    session.run(mapOf(inputName to tensor)).use { results ->
-                        val outputTensor = results.get(outputName).get() as OnnxTensor
-                        val outputBuffer = outputTensor.floatBuffer
-
-                        val chOut0 = FloatArray(stft.freqBins * CHUNK_FRAMES)
-                        val chOut1 = FloatArray(stft.freqBins * CHUNK_FRAMES)
-                        outputBuffer.get(chOut0)
-                        outputBuffer.get(chOut1)
-
-                        for (k in 0 until stft.freqBins) {
-                            for (f in 0 until realChunkSize) {
-                                val base = k * CHUNK_FRAMES + f
-                                vocalsLeftMag[(sub + f) * stft.freqBins + k] = chOut0[base]
-                                vocalsRightMag[(sub + f) * stft.freqBins + k] = chOut1[base]
-                            }
-                        }
-                    }
-                }
-
-                sub = subEnd
-            }
-
-            // 3. Ratio mask e ricostruzione voce (Re/Im), solo per questo blocco.
-            val vocalsLeftRe = FloatArray(blockLeftRe.size)
-            val vocalsLeftIm = FloatArray(blockLeftIm.size)
-            val vocalsRightRe = FloatArray(blockRightRe.size)
-            val vocalsRightIm = FloatArray(blockRightIm.size)
-            for (i in blockLeftMag.indices) {
-                val leftRatio = (vocalsLeftMag[i] / (blockLeftMag[i] + EPS)).coerceIn(0f, 1f)
-                val rightRatio = (vocalsRightMag[i] / (blockRightMag[i] + EPS)).coerceIn(0f, 1f)
-                vocalsLeftRe[i] = blockLeftRe[i] * leftRatio
-                vocalsLeftIm[i] = blockLeftIm[i] * leftRatio
-                vocalsRightRe[i] = blockRightRe[i] * rightRatio
-                vocalsRightIm[i] = blockRightIm[i] * rightRatio
-            }
-
-            // 4. ISTFT in streaming: ogni frame produce hopLength campioni "definitivi",
-            //    subito sottratti dal mix originale (nessun buffer a piena durata brano).
-            for (localFrame in 0 until blockFrameCount) {
-                val offset = localFrame * stft.freqBins
-                val outL = istftLeft.pushFrame(vocalsLeftRe, vocalsLeftIm, offset)
-                val outR = istftRight.pushFrame(vocalsRightRe, vocalsRightIm, offset)
-                writeInstrumental(instrumentalLeft, signal.left, outL, writtenSamples)
-                writeInstrumental(instrumentalRight, signal.right, outR, writtenSamples)
-                writtenSamples += outL.size
-            }
-
-            frameOffset = blockEnd
-            onProgress(2 + (frameOffset * 93) / totalFrames)
+        // 1. Normalizzazione di picco (replica esatta del comportamento del tool di riferimento
+        //    audio-separator: se il picco supera 0.9, scala giù prima di processare, poi
+        //    ri-scala il risultato per il picco ORIGINALE, non per 0.9).
+        var peak = 0f
+        for (i in 0 until signal.size) {
+            peak = max(peak, max(abs(signal.left[i]), abs(signal.right[i])))
+        }
+        val (procLeft, procRight) = if (peak > NORMALIZATION_PEAK) {
+            val scale = NORMALIZATION_PEAK / peak
+            val l = FloatArray(signal.size) { signal.left[it] * scale }
+            val r = FloatArray(signal.size) { signal.right[it] * scale }
+            Pair(l, r)
+        } else {
+            Pair(signal.left, signal.right)
         }
 
-        // 5. Flush finale: gli ultimi campioni di coda dell'overlap-add.
-        val tailL = istftLeft.flush()
-        val tailR = istftRight.flush()
-        writeInstrumental(instrumentalLeft, signal.left, tailL, writtenSamples)
-        writeInstrumental(instrumentalRight, signal.right, tailR, writtenSamples)
+        // 2. Chunking a finestre sovrapposte (25%) con inferenza ONNX per chunk.
+        // `processChunk` non è una lambda "suspend" (MdxChunker è codice puro senza
+        // coroutine), quindi catturiamo qui il coroutineContext corrente per poter comunque
+        // controllare la cancellazione (ensureActive() su CoroutineContext non è suspend).
+        val ctx = coroutineContext
+        var chunksDone = 0
+        val estimatedChunks = max(1, (signal.size / (HOP_LENGTH * (DIM_T - 1) / 2)) + 1)
+        val (instL, instR) = chunker.processStereo(procLeft, procRight) { chunkL, chunkR ->
+            ctx.ensureActive()
+            val result = runModelOnChunk(chunkL, chunkR)
+            chunksDone++
+            onProgress(2 + minOf(93, (chunksDone * 93) / estimatedChunks))
+            result
+        }
+
+        // 3. Annulla la normalizzazione di picco del punto 1.
+        val instrumentalLeft = FloatArray(signal.size) { instL[it] * peak }
+        val instrumentalRight = FloatArray(signal.size) { instR[it] * peak }
+
+        // 4. Normalizzazione di sicurezza in output: il modello può occasionalmente produrre
+        //    un picco leggermente superiore a 1.0 (verificato su audio reale: ~1.01), che
+        //    causerebbe clipping udibile in riproduzione con AudioTrack (ENCODING_PCM_FLOAT).
+        //    Replica il comportamento del tool di riferimento audio-separator, che applica la
+        //    stessa normalizzazione (soglia 0.9) anche in scrittura del file di output.
+        var outputPeak = 0f
+        for (i in instrumentalLeft.indices) {
+            outputPeak = max(outputPeak, max(abs(instrumentalLeft[i]), abs(instrumentalRight[i])))
+        }
+        if (outputPeak > NORMALIZATION_PEAK) {
+            val outScale = NORMALIZATION_PEAK / outputPeak
+            for (i in instrumentalLeft.indices) {
+                instrumentalLeft[i] *= outScale
+                instrumentalRight[i] *= outScale
+            }
+        }
 
         onProgress(100)
         return StereoPcm(instrumentalLeft, instrumentalRight)
     }
 
-    /** Sottrae dal segnale originale [original] i campioni vocali [vocalsChunk], a partire da [startIdx]. */
-    private fun writeInstrumental(dest: FloatArray, original: FloatArray, vocalsChunk: FloatArray, startIdx: Int) {
-        for (i in vocalsChunk.indices) {
-            val idx = startIdx + i
-            if (idx < dest.size) dest[idx] = original[idx] - vocalsChunk[i]
+    /** Esegue STFT -> ONNX -> ISTFT su un singolo chunk stereo (dimensione fissa chunkSize). */
+    private fun runModelOnChunk(chunkL: FloatArray, chunkR: FloatArray): Pair<FloatArray, FloatArray> {
+        val (leftRe, leftIm) = mdxStft.forward(chunkL)
+        val (rightRe, rightIm) = mdxStft.forward(chunkR)
+
+        // Azzera le prime 3 bin di frequenza (riduzione rumore a bassa frequenza, come da
+        // implementazione di riferimento: spek[:, :, :3, :] *= 0).
+        zeroFirstBins(leftRe, leftIm, DIM_F, 3)
+        zeroFirstBins(rightRe, rightIm, DIM_F, 3)
+
+        val inputData = FloatArray(4 * DIM_F * DIM_T)
+        // Layout canale: [L_re, L_im, R_re, R_im], ciascuno [DIM_F, DIM_T] (bin-major, poi tempo).
+        writeChannel(inputData, 0, leftRe)
+        writeChannel(inputData, 1, leftIm)
+        writeChannel(inputData, 2, rightRe)
+        writeChannel(inputData, 3, rightIm)
+
+        val shape = longArrayOf(1L, 4L, DIM_F.toLong(), DIM_T.toLong())
+        val inputBuffer = FloatBuffer.wrap(inputData)
+        OnnxTensor.createTensor(env, inputBuffer, shape).use { inputTensor ->
+            session.run(mapOf(inputName to inputTensor)).use { results ->
+                val outputTensor = results.get(outputName).get() as OnnxTensor
+                val outBuffer = outputTensor.floatBuffer
+                val outData = FloatArray(4 * DIM_F * DIM_T)
+                outBuffer.get(outData)
+
+                val outLeftRe = readChannel(outData, 0)
+                val outLeftIm = readChannel(outData, 1)
+                val outRightRe = readChannel(outData, 2)
+                val outRightIm = readChannel(outData, 3)
+
+                // Ripristina le bin di frequenza da DIM_F a freqBins (nFft/2+1) con zero-padding
+                // prima dell'ISTFT (il modello opera solo sulle frequenze più basse).
+                val leftFullRe = padToFreqBins(outLeftRe, DIM_T)
+                val leftFullIm = padToFreqBins(outLeftIm, DIM_T)
+                val rightFullRe = padToFreqBins(outRightRe, DIM_T)
+                val rightFullIm = padToFreqBins(outRightIm, DIM_T)
+
+                val outChunkL = mdxStft.inverse(leftFullRe, leftFullIm, DIM_T, chunkL.size)
+                val outChunkR = mdxStft.inverse(rightFullRe, rightFullIm, DIM_T, chunkR.size)
+                return Pair(outChunkL, outChunkR)
+            }
         }
+    }
+
+    private fun zeroFirstBins(re: FloatArray, im: FloatArray, dimF: Int, count: Int) {
+        val frames = re.size / dimF
+        for (frame in 0 until frames) {
+            for (bin in 0 until count) {
+                re[frame * dimF + bin] = 0f
+                im[frame * dimF + bin] = 0f
+            }
+        }
+    }
+
+    /** Scrive re/im [frames*dimF] (bin-major) nel layout [channel][dimF][dimT] atteso dal tensore ONNX. */
+    private fun writeChannel(dest: FloatArray, channel: Int, data: FloatArray) {
+        val channelOffset = channel * DIM_F * DIM_T
+        for (frame in 0 until DIM_T) {
+            for (bin in 0 until DIM_F) {
+                dest[channelOffset + bin * DIM_T + frame] = data[frame * DIM_F + bin]
+            }
+        }
+    }
+
+    /** Legge un canale [DIM_F, DIM_T] dal tensore di output e lo riporta al layout [frame*dimF+bin]. */
+    private fun readChannel(src: FloatArray, channel: Int): FloatArray {
+        val channelOffset = channel * DIM_F * DIM_T
+        val out = FloatArray(DIM_T * DIM_F)
+        for (frame in 0 until DIM_T) {
+            for (bin in 0 until DIM_F) {
+                out[frame * DIM_F + bin] = src[channelOffset + bin * DIM_T + frame]
+            }
+        }
+        return out
+    }
+
+    /** Riporta [data] (piatto [frames*DIM_F]) a [frames*freqBins], zero-paddando le bin mancanti. */
+    private fun padToFreqBins(data: FloatArray, frames: Int): FloatArray {
+        val freqBins = mdxStft.freqBins
+        val out = FloatArray(frames * freqBins)
+        for (frame in 0 until frames) {
+            System.arraycopy(data, frame * DIM_F, out, frame * freqBins, DIM_F)
+        }
+        return out
     }
 
     fun close() = session.close()

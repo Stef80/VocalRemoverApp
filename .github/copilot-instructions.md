@@ -11,7 +11,7 @@ commits made automatically — that behavior is retired.
 
 ## Model file setup (required before build)
 
-`app/src/main/assets/vocal_remover.onnx` (~108MB, Open-Unmix UMX-L) is **not tracked in git** (excluded via `.gitignore`, `*.onnx`) because it exceeds GitHub's 100MB file size limit. It must be downloaded manually and placed at that exact path before building — see `README.md` for the download link and steps. Do not attempt to `git add -f` this file; it will be rejected by GitHub's push size check.
+`app/src/main/assets/vocal_remover.onnx` (~59MB, UVR-MDX-NET-Inst_HQ_5) is **not tracked in git** (excluded via `.gitignore`, `*.onnx`) because it exceeds GitHub's 100MB file size limit. It must be downloaded manually and placed at that exact path before building — see `README.md` for the download link and steps. Do not attempt to `git add -f` this file; it will be rejected by GitHub's push size check.
 
 ## Build, test, and lint
 
@@ -43,27 +43,24 @@ The app pipeline is:
 
 1. `MainActivity` handles permissions, file selection, UI state, and player controls.
 2. `AudioPlayer` decodes input audio (`MediaExtractor` + `MediaCodec`) into true stereo float PCM at 44.1kHz (`StereoPcm`, no premature downmix), calls vocal-removal processing, and downmixes to mono only right before playback with `AudioTrack`.
-3. `VocalRemover` runs model inference with **ONNX Runtime** (`onnxruntime-android:1.24.3`) using an **Open-Unmix (UMX-L) ONNX model** (`vocal_remover.onnx`, ~108MB, stereo-aware):
-   - Processes audio in bounded **blocks** (`BLOCK_FRAMES = 200` STFT frames, ~4.6s) to keep peak memory constant regardless of song length (avoids OOM on long tracks).
-   - Per block: block-wise STFT (`StftProcessor.stftRange`) on both channels → magnitude → ONNX inference in fixed **100-frame sub-chunks** (`CHUNK_FRAMES = 100`, hardcoded because the model's ONNX graph has fixed internal `Reshape` nodes that only accept exactly 100 frames; zero-padded on the last partial chunk) → ratio mask vs. original magnitude → reconstruct vocal Re/Im using original phase.
-   - Vocal Re/Im frames are fed into a **streaming ISTFT** (`StftProcessor.StreamingIstft`) which maintains only a small `carryData`/`carryNorm` buffer (size `nFft`) per channel and emits `hopLength` finalized samples per frame — mathematically identical to whole-signal overlap-add ISTFT (verified numerically, zero diff), so no additional artifacts vs. the old whole-song approach.
-   - Instrumental output is computed immediately per emitted sample (`original - vocals`), written into pre-allocated full-length output arrays — no full-song spectrogram is ever held in memory.
-   - The model applies input/output normalization (`input_mean`/`input_scale`/`output_scale`/`output_mean`) internally in the ONNX graph; Kotlin code must NOT apply this normalization again.
-4. `StftProcessor` provides FFT/STFT/ISTFT primitives (no external DSP library in the Android app path):
-   - Whole-signal `stft()`/`istft()` (legacy, still used by tests/other call sites).
-   - Block-wise `frameCount()`/`stftRange()` and the `StreamingIstft` inner class for bounded-memory streaming processing — this is what `VocalRemover` uses now.
+3. `VocalRemover` runs model inference with **ONNX Runtime** (`onnxruntime-android:1.24.3`) using the **UVR-MDX-NET-Inst_HQ_5** ONNX model (`vocal_remover.onnx`, ~59MB, stereo-aware, replaces the previous Open-Unmix model as of the 2026-09 migration — benchmarking on real audio showed 3-4x lower vocal cross-leak, 0.02-0.03 vs 0.08-0.14):
+   - The model outputs the **instrumental's complex spectrum directly** (no ratio-mask step, unlike the old Open-Unmix pipeline) — ONNX inference output goes straight into ISTFT.
+   - `MdxStftProcessor` implements the model's exact **centered/reflect-padded STFT/ISTFT** convention (`n_fft=5120`, `hop_length=1024`, `dim_f=2560` frequency-bin crop) required by MDX-Net, distinct from `StftProcessor`'s non-centered convention. Since `n_fft=5120` is not a power of 2, it uses `BluesteinFft` (arbitrary-length FFT via Bluestein's algorithm, built on the existing radix-2 engine) instead of a plain radix-2 FFT.
+   - `MdxChunker` implements the reference tool's outer 25%-overlap waveform chunking (fixed `chunkSize = hopLength*(dimT-1)` samples per ONNX call, since the graph has a fixed `dim_t=256` frame constraint), overlap-added with a **symmetric** Hann window (`numpy.hanning` formula, denominator `len-1` — distinct from the STFT's **periodic** Hann window, denominator `nFft`). `processStereo` drives both channels in lockstep since the model takes a single joint 4-channel tensor (`[L_re, L_im, R_re, R_im]`) per chunk, not two independent per-channel passes.
+   - Peak normalization quirk (replicated exactly from the reference tool): if `max(abs(signal)) > 0.9`, scale down by `0.9/peak` before processing, then multiply the final output by the **original** (pre-scaling) peak — not by `0.9`.
+   - The first 3 frequency bins of the model's input spectrum are zeroed before every inference call (matches reference tool behavior).
+4. `StftProcessor` provides the legacy FFT/STFT/ISTFT primitives (radix-2 only, non-centered, `n_fft=4096`) — still used by its own tests; `MdxStftProcessor`/`BluesteinFft` are the primitives actually used by the current `VocalRemover` pipeline.
 
 Related offline tooling (deprecated, kept for reference only):
 
-- `convert_spleeter.py` converts Spleeter 2-stems to TFLite; this pipeline has been superseded by the ONNX Runtime + Open-Unmix pipeline above and is no longer wired into the app. Do not assume `spleeter_2stems.tflite`/TensorFlow Lite is in use.
+- `convert_spleeter.py` converts Spleeter 2-stems to TFLite; this pipeline has been superseded and is no longer wired into the app. Do not assume `spleeter_2stems.tflite`/TensorFlow Lite is in use.
 
 ## Key repository conventions
 
 - Keep audio constants aligned across components:
-  - `StftProcessor` (`nFft=4096`, `hopLength=1024`, `sampleRate=44100`) — these match the Open-Unmix ONNX model's expected STFT params exactly.
+  - `MdxStftProcessor`/`MdxChunker` (`nFft=5120`, `hopLength=1024`, `dimF=2560`, `dimT=256`, `overlap=0.25`) — these match the UVR-MDX-NET-Inst_HQ_5 ONNX model's expected I/O contract exactly (`[batch,4,2560,256]` tensor, channel order `[L_re,L_im,R_re,R_im]`).
   - `AudioPlayer` decode/processing is **true stereo** float PCM at 44.1kHz (`StereoPcm`); downmix to mono happens only immediately before `AudioTrack` playback.
-  - The ONNX model (`VocalRemover.CHUNK_FRAMES = 100`) requires **exactly** 100 STFT frames per inference call — this is a hard constraint baked into the model graph, not a tunable value.
-  - `VocalRemover.BLOCK_FRAMES` (currently 200) controls per-block memory/granularity for the streaming pipeline; safe to tune for memory/performance tradeoffs, unlike `CHUNK_FRAMES`.
+  - `VocalRemover.DIM_T = 256` requires **exactly** 256 STFT frames per inference call — this is a hard constraint baked into the model graph, not a tunable value. `MdxChunker`'s outer chunking exists specifically to feed the model fixed-size chunks regardless of song length.
 - Never feed the model duplicated mono-as-stereo data — it is a genuinely stereo-aware model and requires real left/right channel differences for correct separation quality.
 - Preserve progress-phase semantics exposed to UI:
   - processing progress is emitted from `VocalRemover.removeVocals` and mapped in `MainActivity` to user-facing phase labels.

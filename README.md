@@ -1,12 +1,12 @@
 # VocalRemoverApp
 
-App Android per la separazione voce/strumentale on-device tramite ONNX Runtime e un modello Open-Unmix (UMX-L).
+App Android per la separazione voce/strumentale on-device tramite ONNX Runtime e un modello UVR-MDX-NET-Inst_HQ_5.
 
 ## Setup del modello ONNX (obbligatorio)
 
-Il modello `vocal_remover.onnx` (~108MB) **non è incluso nel repository** perché supera il limite di 100MB imposto da GitHub. Va scaricato manualmente prima di poter compilare/eseguire l'app.
+Il modello `vocal_remover.onnx` (~59MB, UVR-MDX-NET-Inst_HQ_5) **non è incluso nel repository** perché supera il limite di 100MB imposto da GitHub (o comunque per non appesantire il repo). Va scaricato manualmente prima di poter compilare/eseguire l'app.
 
-1. Scarica `umxl_vocals.onnx` da [Generalclassic1700/GEC1700-vocal-remover](https://huggingface.co/Generalclassic1700/GEC1700-vocal-remover) su Hugging Face.
+1. Scarica `UVR-MDX-NET-Inst_HQ_5.onnx` da [Ultimate Vocal Remover models](https://github.com/TRvlvr/model_repo/releases) (o dal repository/hub da cui è stato ottenuto).
 2. Rinominalo in `vocal_remover.onnx`.
 3. Copialo in `app/src/main/assets/vocal_remover.onnx`.
 
