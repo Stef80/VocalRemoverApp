@@ -24,6 +24,8 @@ class MdxChunker(
     private val trim = nFft / 2
     private val chunkSize = hopLength * (dimT - 1)
     private val genSize = chunkSize - 2 * trim
+    private val fullChunkWindow: FloatArray? =
+        if (overlap != 0.0) symmetricHann(chunkSize) else null
 
     init {
         require(genSize > 0) {
@@ -43,15 +45,26 @@ class MdxChunker(
         right: FloatArray,
         processChunk: (FloatArray, FloatArray) -> Pair<FloatArray, FloatArray>
     ): Pair<FloatArray, FloatArray> {
+        val outL = FloatArray(left.size)
+        val outR = FloatArray(right.size)
+        processStereoInto(left, right, outL, outR, processChunk)
+        return Pair(outL, outR)
+    }
+
+    fun processStereoInto(
+        left: FloatArray,
+        right: FloatArray,
+        outLeft: FloatArray,
+        outRight: FloatArray,
+        processChunk: (FloatArray, FloatArray) -> Pair<FloatArray, FloatArray>
+    ) {
         require(left.size == right.size) { "I canali devono avere la stessa lunghezza" }
+        require(outLeft.size == left.size) { "L'output sinistro deve avere la stessa lunghezza dell'input" }
+        require(outRight.size == right.size) { "L'output destro deve avere la stessa lunghezza dell'input" }
         val n = left.size
         val step = ((1.0 - overlap) * chunkSize).toInt()
         val pad = genSize + trim - (n % genSize)
         val mixtureLen = trim + n + pad
-
-        val mixtureL = FloatArray(mixtureLen).also { System.arraycopy(left, 0, it, trim, n) }
-        val mixtureR = FloatArray(mixtureLen).also { System.arraycopy(right, 0, it, trim, n) }
-
         val resultL = FloatArray(mixtureLen)
         val resultR = FloatArray(mixtureLen)
         val divider = FloatArray(mixtureLen)
@@ -61,13 +74,17 @@ class MdxChunker(
             val end = min(i + chunkSize, mixtureLen)
             val actualLen = end - i
 
-            val chunkL = FloatArray(chunkSize).also { System.arraycopy(mixtureL, i, it, 0, actualLen) }
-            val chunkR = FloatArray(chunkSize).also { System.arraycopy(mixtureR, i, it, 0, actualLen) }
+            val chunkL = FloatArray(chunkSize)
+            val chunkR = FloatArray(chunkSize)
+            for (k in 0 until actualLen) {
+                chunkL[k] = paddedSample(left, n, pad, i + k)
+                chunkR[k] = paddedSample(right, n, pad, i + k)
+            }
 
             val (processedL, processedR) = processChunk(chunkL, chunkR)
 
             if (overlap != 0.0) {
-                val win = symmetricHann(actualLen)
+                val win = if (actualLen == chunkSize) fullChunkWindow!! else symmetricHann(actualLen)
                 for (k in 0 until actualLen) {
                     resultL[i + k] += processedL[k] * win[k]
                     resultR[i + k] += processedR[k] * win[k]
@@ -83,15 +100,12 @@ class MdxChunker(
             i += step
         }
 
-        val outL = FloatArray(n)
-        val outR = FloatArray(n)
         for (idx in 0 until n) {
             val srcIdx = trim + idx
             val d = divider[srcIdx]
-            outL[idx] = if (d > 1e-8f) resultL[srcIdx] / d else 0f
-            outR[idx] = if (d > 1e-8f) resultR[srcIdx] / d else 0f
+            outLeft[idx] = if (d > 1e-8f) resultL[srcIdx] / d else 0f
+            outRight[idx] = if (d > 1e-8f) resultR[srcIdx] / d else 0f
         }
-        return Pair(outL, outR)
     }
 
     /** Finestra di Hann SIMMETRICA (formula numpy.hanning: denominatore len-1, non len). */
@@ -100,5 +114,25 @@ class MdxChunker(
         return FloatArray(len) { n ->
             (0.5 - 0.5 * cos(2.0 * Math.PI * n / (len - 1))).toFloat()
         }
+    }
+
+    private fun paddedSample(source: FloatArray, sourceLen: Int, pad: Int, index: Int): Float {
+        return when {
+            index < trim -> source[reflectIndex(trim - index, sourceLen)]
+            index < trim + sourceLen -> source[index - trim]
+            else -> {
+                val tailIndex = index - (trim + sourceLen)
+                source[reflectIndex(sourceLen - 2 - tailIndex, sourceLen)]
+            }
+        }
+    }
+
+    private fun reflectIndex(indexIn: Int, n: Int): Int {
+        if (n == 1) return 0
+        var idx = indexIn
+        val period = 2 * (n - 1)
+        idx %= period
+        if (idx < 0) idx += period
+        return if (idx < n) idx else period - idx
     }
 }

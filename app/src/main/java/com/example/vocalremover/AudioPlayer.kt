@@ -5,12 +5,14 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.MediaCodec
-import android.media.MediaExtractor
 import android.media.MediaFormat
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.MediaExtractorCompat
 import android.net.Uri
 import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.*
+import kotlin.coroutines.coroutineContext
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -30,6 +32,7 @@ class AudioPlayer(private val context: Context) {
     private var audioTrack: AudioTrack? = null
     private var processedPcm: StereoPcm? = null
     private var playbackJob: Job? = null
+    private var processingJob: Job? = null
     private var playheadPosition = 0 // frames
 
     var onProgress: (Int) -> Unit = {}
@@ -53,36 +56,57 @@ class AudioPlayer(private val context: Context) {
         onReady()
     }
 
-    suspend fun loadAndProcess(uri: Uri, remover: VocalRemover) = withContext(Dispatchers.IO) {
+    fun cancelProcessing() {
+        processingJob?.cancel(CancellationException("Processing cancelled by lifecycle change"))
+        processingJob = null
+    }
+
+    suspend fun loadAndProcess(uri: Uri, remover: VocalRemover) {
+        val currentJob = coroutineContext[Job]
+        processingJob = currentJob
         try {
-            onProgress(2)
-            
-            // Decodifica e processamento in blocchi per limitare i riferimenti contemporanei ad array giganti
-            val instrumental = decodeAudio(uri)?.let { mix ->
-                Log.d(TAG, "Decodificati ${mix.size} frame stereo")
-                val result = remover.removeVocals(mix) { progress ->
-                    onProgress(progress)
+            withContext(Dispatchers.IO) {
+                try {
+                    Log.i(TAG, "Avvio caricamento audio: uri=$uri")
+                    onProgress(2)
+
+                    // Decodifica e processamento in blocchi per limitare i riferimenti contemporanei ad array giganti
+                    val instrumental = decodeAudio(uri)?.let { mix ->
+                        Log.i(TAG, "Caricamento completato: frames=${mix.size}")
+                        Log.i(TAG, "Avvio rimozione voce: frames=${mix.size}")
+                        val result = remover.removeVocals(mix) { progress ->
+                            onProgress(progress)
+                        }
+                        Log.i(TAG, "Rimozione voce completata: frames=${result.size}")
+                        result
+                    }
+
+                    if (instrumental == null) {
+                        withContext(Dispatchers.Main) { onError("Impossibile decodificare o elaborare il file audio") }
+                        return@withContext
+                    }
+
+                    processedPcm = instrumental
+
+                    System.gc() // Suggerimento per ripulire mix originale e instrumental stereo
+
+                    withContext(Dispatchers.Main) {
+                        prepareAudioTrack()
+                        onReady()
+                    }
+
+                } catch (cancelled: CancellationException) {
+                    Log.i(TAG, "Elaborazione audio annullata dal ciclo di vita", cancelled)
+                    return@withContext
+                } catch (e: Exception) {
+                    Log.e(TAG, "Errore elaborazione", e)
+                    withContext(Dispatchers.Main) { onError(e.message ?: "Errore sconosciuto") }
                 }
-                result
             }
-
-            if (instrumental == null) {
-                withContext(Dispatchers.Main) { onError("Impossibile decodificare o elaborare il file audio") }
-                return@withContext
+        } finally {
+            if (processingJob === currentJob) {
+                processingJob = null
             }
-
-            processedPcm = instrumental
-            
-            System.gc() // Suggerimento per ripulire mix originale e instrumental stereo
-
-            withContext(Dispatchers.Main) {
-                prepareAudioTrack()
-                onReady()
-            }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Errore elaborazione", e)
-            withContext(Dispatchers.Main) { onError(e.message ?: "Errore sconosciuto") }
         }
     }
 
@@ -94,10 +118,11 @@ class AudioPlayer(private val context: Context) {
         }
     }
 
+    @OptIn(UnstableApi::class)
     private fun decodeAudio(uri: Uri): StereoPcm? {
-        val extractor = MediaExtractor()
+        val extractor = MediaExtractorCompat(context)
         try {
-            extractor.setDataSource(context, uri, null)
+            extractor.setDataSource(uri, 0L)
             var audioTrackIdx = -1
             var format: MediaFormat? = null
             for (i in 0 until extractor.trackCount) {
@@ -110,11 +135,18 @@ class AudioPlayer(private val context: Context) {
             val srcSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             val srcChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
+            Log.i(
+                TAG,
+                "Decodifica audio iniziata: sampleRate=$srcSampleRate channels=$srcChannels durationUs=$durationUs"
+            )
             
             // Stima iniziale dei campioni per evitare troppi ridimensionamenti e array intermedi
             val initialCapacity = if (durationUs > 0) ((durationUs * srcSampleRate) / 1_000_000L).toInt() + 1000 else 1024 * 1024
+            Log.i(TAG, "Stima iniziale campioni: $initialCapacity")
             var left = FloatArray(initialCapacity)
+            Log.i(TAG, "Stima iniziale array: ${left.size}")
             var right = FloatArray(initialCapacity)
+            Log.i(TAG, "Stima iniziale array: ${right.size}")
             var sampleIndex = 0
 
             extractor.selectTrack(audioTrackIdx)
@@ -182,12 +214,14 @@ class AudioPlayer(private val context: Context) {
             // Tronca alla dimensione effettiva
             val decodedL = if (sampleIndex == left.size) left else left.copyOf(sampleIndex)
             val decodedR = if (sampleIndex == right.size) right else right.copyOf(sampleIndex)
+            Log.i(TAG, "Decodifica audio completata: decodedFrames=$sampleIndex")
             
             if (srcSampleRate == SAMPLE_RATE) return StereoPcm(decodedL, decodedR)
 
             // Resampling lineare se il file non è a 44.1kHz
             val ratio = srcSampleRate.toDouble() / SAMPLE_RATE
             val outLen = (decodedL.size / ratio).toInt()
+            Log.i(TAG, "Resampling audio: from=$srcSampleRate to=$SAMPLE_RATE outFrames=$outLen")
             val resampledL = FloatArray(outLen)
             val resampledR = FloatArray(outLen)
             for (i in 0 until outLen) {
@@ -300,6 +334,7 @@ class AudioPlayer(private val context: Context) {
         get() = processedPcm?.let { (it.size * 1000L / SAMPLE_RATE).toInt() } ?: 0
 
     fun release() {
+        cancelProcessing()
         stop()
         audioTrack?.release()
         audioTrack = null

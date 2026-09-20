@@ -2,7 +2,9 @@ package com.example.vocalremover.capture
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.fail
 import org.junit.Test
+import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -99,6 +101,63 @@ class WavPcm16SerializerTest {
         assertEquals(8, header.int)
     }
 
+    @Test
+    fun `streams large stereo wav without allocating a giant byte array`() {
+        val sampleCount = 20_000_000
+        val left = FloatArray(sampleCount) { 0.25f }
+        val right = FloatArray(sampleCount) { -0.25f }
+        val output = CountingHeaderCapturingOutputStream()
+
+        try {
+            WavPcm16StereoSerializer.writeTo(output, left, right)
+        } catch (_: IllegalArgumentException) {
+            fail("Large stereo WAV should be streamed without Int-sized buffer allocation")
+        }
+
+        assertEquals(44L + sampleCount.toLong() * 4L, output.totalBytesWritten)
+        val header = ByteBuffer.wrap(output.headerBytes).order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals("RIFF", header.readFourCc())
+        assertEquals(sampleCount * 4 + 36, header.int)
+        assertEquals("WAVE", header.readFourCc())
+        assertEquals("fmt ", header.readFourCc())
+        assertEquals(16, header.int)
+        assertEquals(1, header.short.toInt())
+        header.position(22)
+        assertEquals(2, header.short.toInt())
+        assertEquals(44_100, header.int)
+        assertEquals(176_400, header.int)
+        assertEquals(4, header.short.toInt())
+        assertEquals(16, header.short.toInt())
+        assertEquals("data", header.readFourCc())
+        assertEquals(sampleCount * 4, header.int)
+    }
+
     private fun ByteBuffer.readFourCc(): String =
         ByteArray(4).also(::get).toString(Charsets.US_ASCII)
+
+    private class CountingHeaderCapturingOutputStream : OutputStream() {
+        private val header = ByteArray(44)
+        private var headerOffset = 0
+        var totalBytesWritten: Long = 0
+            private set
+
+        val headerBytes: ByteArray
+            get() = header.copyOf()
+
+        override fun write(b: Int) {
+            if (headerOffset < header.size) {
+                header[headerOffset++] = b.toByte()
+            }
+            totalBytesWritten++
+        }
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            if (headerOffset < header.size) {
+                val bytesToCopy = minOf(len, header.size - headerOffset)
+                System.arraycopy(b, off, header, headerOffset, bytesToCopy)
+                headerOffset += bytesToCopy
+            }
+            totalBytesWritten += len.toLong()
+        }
+    }
 }

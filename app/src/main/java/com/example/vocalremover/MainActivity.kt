@@ -13,6 +13,7 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
@@ -47,6 +48,7 @@ import java.util.UUID
 class MainActivity : AppCompatActivity() {
 
     companion object {
+        private const val TAG = "MainActivity"
         private const val STATE_PENDING_CAPTURE_TARGET_PACKAGE =
             "pending_capture_target_package"
         private const val PREFS_CAPTURE_PACKAGE_PICKER = "capture_package_picker"
@@ -210,6 +212,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        audioPlayer.cancelProcessing()
         if (captureReceiverRegistered) {
             runCatching {
                 unregisterReceiver(captureReceiver)
@@ -227,6 +230,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        audioPlayer.cancelProcessing()
         val resultId = processingCaptureResultId
         val processingJob = captureProcessingJob
         val closeVocalRemoverAfterJob = processingJob?.isActive == true
@@ -341,10 +345,23 @@ class MainActivity : AppCompatActivity() {
             }
         }
         autoCompleteView.setOnFocusChangeListener { _, hasFocus ->
-            if (hasFocus) autoCompleteView.showDropDown()
+            if (hasFocus) showCapturePackageDropdown(autoCompleteView)
         }
-        autoCompleteView.setOnClickListener { autoCompleteView.showDropDown() }
+        autoCompleteView.setOnClickListener { showCapturePackageDropdown(autoCompleteView) }
 
+    }
+
+    private fun showCapturePackageDropdown(autoCompleteView: AutoCompleteTextView) {
+        if (!canShowCaptureDropdown(
+                isAttachedToWindow = autoCompleteView.isAttachedToWindow,
+                hasWindowToken = autoCompleteView.windowToken != null,
+                isActivityFinishing = isFinishing,
+                isActivityDestroyed = isDestroyed
+            )
+        ) {
+            return
+        }
+        autoCompleteView.showDropDown()
     }
 
     /**
@@ -435,6 +452,7 @@ class MainActivity : AppCompatActivity() {
 
     // ── Elaborazione ─────────────────────────────────────────────────────────
     private fun processAudio(uri: Uri) {
+        Log.i(TAG, "Richiesta caricamento brano: uri=$uri")
         setPlayerEnabled(false)
         binding.progressBar.visibility = android.view.View.VISIBLE
         binding.progressBar.progress = 0
@@ -446,6 +464,7 @@ class MainActivity : AppCompatActivity() {
             if (cursor.moveToFirst()) {
                 val name = cursor.getString(0)
                 binding.tvFileName.text = name
+                Log.i(TAG, "Brano selezionato: name=$name")
             }
         }
 
@@ -596,6 +615,10 @@ class MainActivity : AppCompatActivity() {
             CaptureUiState.PROCESSING,
             "Registrazione terminata. Elaborazione in corso…"
         )
+        Log.i(
+            TAG,
+            "Avvio elaborazione registrazione catturata: resultId=${result.id} file=${temporaryWav.absolutePath} bytes=${temporaryWav.length()}"
+        )
         setPlayerEnabled(false)
         binding.progressBar.visibility = View.VISIBLE
         binding.progressBar.progress = 0
@@ -605,6 +628,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val instrumental = withContext(Dispatchers.IO) {
                     val stereoPcm = WavFileReader.readStereoPcm(temporaryWav)
+                    Log.i(TAG, "Registrazione caricata: frames=${stereoPcm.size}")
                     runCatching {
                         RecordingSaver.saveStereoCaptureAsWav(
                             this@MainActivity,
@@ -622,6 +646,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 ensureActive()
                 captureProcessingJob = null
+                Log.i(TAG, "Elaborazione registrazione completata: resultId=${result.id}")
                 showRecordingNameDialog(instrumental, result.id)
             } catch (cancelled: CancellationException) {
                 handleCaptureWorkCancellation(result.id)
@@ -686,6 +711,10 @@ class MainActivity : AppCompatActivity() {
     ) {
         if (processingCaptureResultId != resultId) return
         binding.tvStatus.text = "Salvataggio registrazione..."
+        Log.i(
+            TAG,
+            "Avvio salvataggio registrazione elaborata: resultId=$resultId name=$displayName frames=${instrumental.size}"
+        )
         captureProcessingJob = lifecycleScope.launch {
             try {
                 val monoPcm = withContext(Dispatchers.IO) {
@@ -707,6 +736,7 @@ class MainActivity : AppCompatActivity() {
                 binding.tvFileName.text = "$displayName.wav"
                 audioPlayer.loadProcessedStereo(monoPcm)
                 ensureActive()
+                Log.i(TAG, "Salvataggio registrazione completato: resultId=$resultId")
                 completeSavedCaptureHandoff(resultId)
             } catch (cancelled: CancellationException) {
                 handleCaptureWorkCancellation(resultId)

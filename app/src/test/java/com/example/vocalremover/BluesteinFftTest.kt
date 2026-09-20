@@ -81,6 +81,25 @@ class BluesteinFftTest {
     }
 
     @Test
+    fun `reusable workspace preserves independent transforms`() {
+        val workspace = BluesteinFft.newWorkspace(6)
+        val first = floatArrayOf(1f, 2f, 3f, 4f, 5f, 6f)
+        val second = floatArrayOf(6f, 5f, 4f, 3f, 2f, 1f)
+        val firstIm = FloatArray(6)
+        val secondIm = FloatArray(6)
+
+        BluesteinFft.transform(first, firstIm, workspace = workspace)
+        BluesteinFft.transform(second, secondIm, workspace = workspace)
+
+        val expectedFirstRe = floatArrayOf(21f, -3f, -3f, -3f, -3f, -3f)
+        val expectedFirstIm = floatArrayOf(0f, 5.196152f, 1.732051f, 0f, -1.732051f, -5.196152f)
+        val expectedSecondRe = floatArrayOf(21f, 3f, 3f, 3f, 3f, 3f)
+        val expectedSecondIm = floatArrayOf(0f, -5.196152f, -1.732051f, 0f, 1.732051f, 5.196152f)
+        assertComplexArraysEqual(expectedFirstRe, expectedFirstIm, first, firstIm)
+        assertComplexArraysEqual(expectedSecondRe, expectedSecondIm, second, secondIm)
+    }
+
+    @Test
     fun `matches existing radix-2 FFT for power-of-2 size (cross-check)`() {
         // Bluestein must agree with the existing StftProcessor-style radix-2 FFT for N=8.
         val re1 = floatArrayOf(1f, 2f, 3f, 4f, -1f, -2f, 0.5f, 0.25f)

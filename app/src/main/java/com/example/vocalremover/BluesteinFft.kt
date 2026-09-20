@@ -1,5 +1,6 @@
 package com.example.vocalremover
 
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -12,6 +13,12 @@ import kotlin.math.sin
  * di 2) mentre StftProcessor (nFft=4096, potenza di 2) usa la propria FFT radix-2 diretta.
  */
 object BluesteinFft {
+
+    class Workspace internal constructor(
+        internal val size: Int,
+        internal val re: FloatArray,
+        internal val im: FloatArray
+    )
 
     private class Plan(val n: Int) {
         val m: Int
@@ -75,16 +82,33 @@ object BluesteinFft {
         }
     }
 
-    private val planCache = HashMap<Int, Plan>()
+    private val planCache = ConcurrentHashMap<Int, Plan>()
+    private val threadWorkspaces = ThreadLocal<MutableMap<Int, Workspace>>()
 
-    private fun planFor(n: Int): Plan = planCache.getOrPut(n) { Plan(n) }
+    private fun planFor(n: Int): Plan = planCache.computeIfAbsent(n) { Plan(it) }
+
+    internal fun newWorkspace(n: Int): Workspace {
+        require(n > 0) { "La dimensione FFT deve essere positiva" }
+        val plan = planFor(n)
+        return Workspace(n, FloatArray(plan.m), FloatArray(plan.m))
+    }
+
+    private fun workspaceFor(n: Int): Workspace {
+        val workspaces = threadWorkspaces.get() ?: HashMap<Int, Workspace>().also(threadWorkspaces::set)
+        return workspaces.getOrPut(n) { newWorkspace(n) }
+    }
 
     /**
      * DFT (o IDFT se [inverse]=true) in-place di lunghezza arbitraria [re].size.
      * Per lunghezze potenza di 2 delega direttamente alla FFT radix-2 (più veloce, nessun
      * overhead di zero-padding). Per le altre lunghezze usa Bluestein.
      */
-    fun transform(re: FloatArray, im: FloatArray, inverse: Boolean = false) {
+    fun transform(
+        re: FloatArray,
+        im: FloatArray,
+        inverse: Boolean = false,
+        workspace: Workspace? = null
+    ) {
         val n = re.size
         require(im.size == n) { "re e im devono avere la stessa lunghezza" }
         if (n == 0) return
@@ -94,18 +118,22 @@ object BluesteinFft {
         }
 
         val plan = planFor(n)
+        val scratch = workspace ?: workspaceFor(n)
+        require(scratch.size == n) { "Il workspace FFT deve avere dimensione $n" }
 
         // a[k] = x[k] * exp(sign * i * pi * k^2 / n), zero-padded a lunghezza m.
         // forward: sign=-1 -> conj(chirp) = (chirpRe, -chirpIm)
         // inverse: sign=+1 -> chirp = (chirpRe, chirpIm)
-        val aRe = FloatArray(plan.m)
-        val aIm = FloatArray(plan.m)
+        val aRe = scratch.re
+        val aIm = scratch.im
         for (k in 0 until n) {
             val cRe = plan.chirpRe[k]
             val cIm = if (inverse) plan.chirpIm[k] else -plan.chirpIm[k]
             aRe[k] = re[k] * cRe - im[k] * cIm
             aIm[k] = re[k] * cIm + im[k] * cRe
         }
+        java.util.Arrays.fill(aRe, n, plan.m, 0f)
+        java.util.Arrays.fill(aIm, n, plan.m, 0f)
 
         radix2Fft(aRe, aIm, inverse = false)
 
