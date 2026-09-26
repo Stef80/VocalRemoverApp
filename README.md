@@ -15,7 +15,17 @@ Il file è elencato in `.gitignore` (pattern `*.onnx`): resterà sul tuo disco m
 ## Build
 
 ```bash
-gradle :app:assembleDebug
+gradle :app:assembleCpuDebug :app:assembleWebgpuDebug
 ```
+
+## Confronto CPU/WebGPU
+
+Installa entrambe le build debug sullo stesso dispositivo per confrontare i backend.
+Gli APK sono in `app/build/outputs/apk/cpu/debug/` e `app/build/outputs/apk/webgpu/debug/`.
+Hanno application ID distinti (`.cpu` e `.webgpu`), quindi cache separate. Usa lo stesso file
+audio e lo stesso modello per entrambe; i log `VocalRemover` riportano backend e percorso/dimensione
+del modello in cache. Ascolta e confronta prima la CPU; se WebGPU rovina l'audio, non usarlo su
+quel dispositivo. Nessun backend viene promosso in base alla sola velocità. I test unitari si
+eseguono con `gradle :app:testCpuDebugUnitTest :app:testWebgpuDebugUnitTest`.
 
 Vedi `.github/copilot-instructions.md` per i dettagli sull'architettura della pipeline audio.

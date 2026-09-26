@@ -39,4 +39,18 @@ class MdxChunkerTest {
             assertEquals("len=$len", len, result.size)
         }
     }
+
+    @Test
+    fun `chunkCount equals number of processed chunks`() {
+        val small = MdxChunker(nFft = 6, hopLength = 2, dimT = 8, overlap = 0.25)
+        for (len in listOf(1, 5, 37, 100, 257)) {
+            var calls = 0
+            small.process(FloatArray(len)) { chunk -> calls++; chunk }
+            assertEquals("len=$len", calls, small.chunkCount(len))
+        }
+
+        // Caso reale dei log: 3.684.352 frame -> 20 chiamate ONNX.
+        val model = MdxChunker(nFft = 5120, hopLength = 1024, dimT = 256, overlap = 0.25)
+        assertEquals(20, model.chunkCount(3_684_352))
+    }
 }

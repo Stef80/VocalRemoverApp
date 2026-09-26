@@ -15,9 +15,29 @@ android {
         versionName = "1.0"
     }
 
+    flavorDimensions += "backend"
+    productFlavors {
+        create("cpu") {
+            dimension = "backend"
+            applicationIdSuffix = ".cpu"
+            buildConfigField("String", "EXECUTION_BACKEND", "\"cpu\"")
+        }
+        create("webgpu") {
+            dimension = "backend"
+            applicationIdSuffix = ".webgpu"
+            buildConfigField("String", "EXECUTION_BACKEND", "\"webgpu\"")
+        }
+        create("qnn") {
+            dimension = "backend"
+            applicationIdSuffix = ".qnn"
+            buildConfigField("String", "EXECUTION_BACKEND", "\"qnn\"")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -32,6 +52,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 
     // Exclude conflicting native libs (es. tra onnxruntime e altre dipendenze)
@@ -39,6 +60,13 @@ android {
         jniLibs {
             pickFirsts += listOf("**/libc++_shared.so")
         }
+    }
+}
+
+androidComponents {
+    onVariants(selector().withFlavor("backend" to "qnn")) { variant ->
+        // QNN: le librerie devono essere estratte su disco perché il DSP carichi le Skel.
+        variant.packaging.jniLibs.useLegacyPackaging.set(true)
     }
 }
 
@@ -54,7 +82,12 @@ dependencies {
     // usa modelli MDX-Net già pre-convertiti in formato .onnx dalla community UVR)
     // v1.23.0+ richiesto: allinea anche il wrapper JNI a pagine 16 KB
     // (obbligatorio per Google Play su Android 15+ dal 1° novembre 2025)
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
+    // La variante qnn usa il pacchetto con QNN EP (stessa API Java, include la dipendenza
+    // com.qualcomm.qti:qnn-runtime); i due AAR non possono convivere nello stesso APK.
+    "cpuImplementation"("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
+    "webgpuImplementation"("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
+    "qnnImplementation"("com.microsoft.onnxruntime:onnxruntime-android-qnn:1.24.3")
+
 
     // TarsosDSP rimosso: decodifica gestita con MediaExtractor/MediaCodec nativi
 

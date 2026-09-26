@@ -120,6 +120,7 @@ class AudioPlayer(private val context: Context) {
 
     @OptIn(UnstableApi::class)
     private fun decodeAudio(uri: Uri): StereoPcm? {
+        val start = System.currentTimeMillis()
         val extractor = MediaExtractorCompat(context)
         try {
             extractor.setDataSource(uri, 0L)
@@ -133,31 +134,35 @@ class AudioPlayer(private val context: Context) {
             if (audioTrackIdx < 0 || format == null) return null
 
             val srcSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            val srcChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
-            Log.i(
-                TAG,
-                "Decodifica audio iniziata: sampleRate=$srcSampleRate channels=$srcChannels durationUs=$durationUs"
-            )
-            
-            // Stima iniziale dei campioni per evitare troppi ridimensionamenti e array intermedi
-            val initialCapacity = if (durationUs > 0) ((durationUs * srcSampleRate) / 1_000_000L).toInt() + 1000 else 1024 * 1024
-            Log.i(TAG, "Stima iniziale campioni: $initialCapacity")
-            var left = FloatArray(initialCapacity)
-            Log.i(TAG, "Stima iniziale array: ${left.size}")
+            val srcChannels   = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            val durationUs    = if (format.containsKey(MediaFormat.KEY_DURATION))
+                format.getLong(MediaFormat.KEY_DURATION) else 0L
+            val mime          = format.getString(MediaFormat.KEY_MIME)!!
+
+            Log.i(TAG, "Decodifica audio iniziata: sampleRate=$srcSampleRate channels=$srcChannels durationUs=$durationUs")
+
+            // Stima in frame (indipendente da 16/32 bit). Margine extra per evitare resize.
+            val initialCapacity = if (durationUs > 0)
+                ((durationUs * srcSampleRate) / 1_000_000L).toInt() + 4096
+            else 1 shl 20   // 1M frame fallback
+
+            var left  = FloatArray(initialCapacity)
             var right = FloatArray(initialCapacity)
-            Log.i(TAG, "Stima iniziale array: ${right.size}")
             var sampleIndex = 0
 
+            // Buffer temporanei riutilizzabili (evitano allocazioni per-buffer)
+            var tmpF = FloatArray(0)
+            var tmpS = ShortArray(0)
+
             extractor.selectTrack(audioTrackIdx)
-            val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+            val codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()
 
             val info = MediaCodec.BufferInfo()
             var isPcmFloat = false
             var eosOut = false
-            
+
             while (!eosOut) {
                 val inIdx = codec.dequeueInputBuffer(10_000)
                 if (inIdx >= 0) {
@@ -170,75 +175,148 @@ class AudioPlayer(private val context: Context) {
                         extractor.advance()
                     }
                 }
-                
+
                 val outIdx = codec.dequeueOutputBuffer(info, 10_000)
                 if (outIdx >= 0) {
                     if (info.size > 0) {
-                        val buf = codec.getOutputBuffer(outIdx)!!
-                        buf.order(ByteOrder.LITTLE_ENDIAN)
-                        
+                        val byteBuf = codec.getOutputBuffer(outIdx)!!
+                        byteBuf.order(ByteOrder.LITTLE_ENDIAN)
+                        // Pattern documentato: limitare alla finestra valida
+                        byteBuf.position(info.offset)
+                        byteBuf.limit(info.offset + info.size)
+
                         val bytesPerSample = if (isPcmFloat) 4 else 2
-                        val numFrames = info.size / (bytesPerSample * srcChannels)
-                        
-                        // Ridimensiona se la stima iniziale era troppo piccola
-                        if (sampleIndex + numFrames > left.size) {
-                            val newSize = (left.size * 1.5).toInt() + numFrames
-                            left = left.copyOf(newSize)
+                        val frameBytes = bytesPerSample * srcChannels
+                        val numFrames = info.size / frameBytes
+
+                        // Crescita geometrica per ridurre i copyOf
+                        val needed = sampleIndex + numFrames
+                        if (needed > left.size) {
+                            var newSize = left.size
+                            while (newSize < needed) newSize = (newSize * 3) / 2 + 1024
+                            left  = left.copyOf(newSize)
                             right = right.copyOf(newSize)
                         }
 
-                        for (i in 0 until numFrames) {
-                            if (isPcmFloat) {
-                                left[sampleIndex] = buf.float
-                                right[sampleIndex] = if (srcChannels >= 2) buf.float else left[sampleIndex]
-                                // Salta eventuali altri canali (es. 5.1)
-                                for (c in 2 until srcChannels) buf.float
-                            } else {
-                                left[sampleIndex] = buf.short.toFloat() / 32768f
-                                right[sampleIndex] = if (srcChannels >= 2) buf.short.toFloat() / 32768f else left[sampleIndex]
-                                for (c in 2 until srcChannels) buf.short
+                        if (isPcmFloat) {
+                            val fb = byteBuf.asFloatBuffer()
+                            when (srcChannels) {
+                                1 -> {
+                                    fb.get(left, sampleIndex, numFrames)
+                                    System.arraycopy(left, sampleIndex, right, sampleIndex, numFrames)
+                                }
+                                2 -> {
+                                    val total = numFrames shl 1
+                                    if (tmpF.size < total) tmpF = FloatArray(total)
+                                    fb.get(tmpF, 0, total)
+                                    var oi = sampleIndex
+                                    var ti = 0
+                                    for (i in 0 until numFrames) {
+                                        left[oi]  = tmpF[ti]
+                                        right[oi] = tmpF[ti + 1]
+                                        oi++; ti += 2
+                                    }
+                                }
+                                else -> {
+                                    val total = numFrames * srcChannels
+                                    if (tmpF.size < total) tmpF = FloatArray(total)
+                                    fb.get(tmpF, 0, total)
+                                    var oi = sampleIndex
+                                    var ti = 0
+                                    for (i in 0 until numFrames) {
+                                        left[oi]  = tmpF[ti]
+                                        right[oi] = tmpF[ti + 1]
+                                        oi++; ti += srcChannels
+                                    }
+                                }
                             }
-                            sampleIndex++
+                        } else {
+                            val sb = byteBuf.asShortBuffer()
+                            val inv = 1f / 32768f
+                            when (srcChannels) {
+                                1 -> {
+                                    val total = numFrames
+                                    if (tmpS.size < total) tmpS = ShortArray(total)
+                                    sb.get(tmpS, 0, total)
+                                    var oi = sampleIndex
+                                    for (i in 0 until total) {
+                                        val v = tmpS[i] * inv
+                                        left[oi]  = v
+                                        right[oi] = v
+                                        oi++
+                                    }
+                                }
+                                2 -> {
+                                    val total = numFrames shl 1
+                                    if (tmpS.size < total) tmpS = ShortArray(total)
+                                    sb.get(tmpS, 0, total)
+                                    var oi = sampleIndex
+                                    var ti = 0
+                                    for (i in 0 until numFrames) {
+                                        left[oi]  = tmpS[ti]     * inv
+                                        right[oi] = tmpS[ti + 1] * inv
+                                        oi++; ti += 2
+                                    }
+                                }
+                                else -> {
+                                    val total = numFrames * srcChannels
+                                    if (tmpS.size < total) tmpS = ShortArray(total)
+                                    sb.get(tmpS, 0, total)
+                                    var oi = sampleIndex
+                                    var ti = 0
+                                    for (i in 0 until numFrames) {
+                                        left[oi]  = tmpS[ti]     * inv
+                                        right[oi] = tmpS[ti + 1] * inv
+                                        oi++; ti += srcChannels
+                                    }
+                                }
+                            }
                         }
+                        sampleIndex += numFrames
                     }
-                    
+
                     codec.releaseOutputBuffer(outIdx, false)
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) eosOut = true
                 } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     val outFormat = codec.outputFormat
-                    isPcmFloat = outFormat.getInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT) == AudioFormat.ENCODING_PCM_FLOAT
+                    isPcmFloat = outFormat.getInteger(
+                        MediaFormat.KEY_PCM_ENCODING,
+                        AudioFormat.ENCODING_PCM_16BIT
+                    ) == AudioFormat.ENCODING_PCM_FLOAT
                 }
             }
             codec.stop(); codec.release()
 
-            // Tronca alla dimensione effettiva
-            val decodedL = if (sampleIndex == left.size) left else left.copyOf(sampleIndex)
+            val decodedL = if (sampleIndex == left.size)  left  else left.copyOf(sampleIndex)
             val decodedR = if (sampleIndex == right.size) right else right.copyOf(sampleIndex)
             Log.i(TAG, "Decodifica audio completata: decodedFrames=$sampleIndex")
-            
+
             if (srcSampleRate == SAMPLE_RATE) return StereoPcm(decodedL, decodedR)
 
-            // Resampling lineare se il file non è a 44.1kHz
-            val ratio = srcSampleRate.toDouble() / SAMPLE_RATE
+            val ratio  = srcSampleRate.toDouble() / SAMPLE_RATE
             val outLen = (decodedL.size / ratio).toInt()
             Log.i(TAG, "Resampling audio: from=$srcSampleRate to=$SAMPLE_RATE outFrames=$outLen")
+
             val resampledL = FloatArray(outLen)
             val resampledR = FloatArray(outLen)
+            val lastIdx = decodedL.size - 1
             for (i in 0 until outLen) {
-                val pos = i * ratio
-                val lo = pos.toInt().coerceAtMost(decodedL.size - 1)
-                val hi = (lo + 1).coerceAtMost(decodedL.size - 1)
+                val pos  = i * ratio
+                val lo   = pos.toInt()              // sempre <= lastIdx per costruzione
+                val hi   = if (lo < lastIdx) lo + 1 else lo
                 val frac = (pos - lo).toFloat()
-                resampledL[i] = decodedL[lo] * (1f - frac) + decodedL[hi] * frac
-                resampledR[i] = decodedR[lo] * (1f - frac) + decodedR[hi] * frac
+                val inv  = 1f - frac
+                resampledL[i] = decodedL[lo] * inv + decodedL[hi] * frac
+                resampledR[i] = decodedR[lo] * inv + decodedR[hi] * frac
             }
             return StereoPcm(resampledL, resampledR)
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Error decoding audio", e)
             return null
         } finally {
             extractor.release()
+            Log.i(TAG, "Decodifica completata in ${System.currentTimeMillis() - start}ms")
         }
     }
 
