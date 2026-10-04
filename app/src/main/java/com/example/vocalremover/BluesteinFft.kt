@@ -9,8 +9,8 @@ import kotlin.math.sin
  * Trasformata di Fourier discreta (DFT/IDFT) per lunghezze arbitrarie (non necessariamente
  * potenze di 2), tramite l'algoritmo di Bluestein (chirp z-transform). Riusa una FFT radix-2
  * interna (potenza di 2) come motore di convoluzione circolare, quindi non richiede alcuna
- * libreria esterna. Necessaria per il modello UVR-MDX-NET (nFft=5120 = 2^10 * 5, non potenza
- * di 2) mentre StftProcessor (nFft=4096, potenza di 2) usa la propria FFT radix-2 diretta.
+ * libreria esterna. Fallback di MdxStftProcessor per le lunghezze che MixedRadixFft non
+ * supporta (diverse da 5·2^k).
  */
 object BluesteinFft {
 

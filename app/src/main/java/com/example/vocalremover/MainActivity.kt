@@ -175,6 +175,10 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         vocalRemover = VocalRemover(this)
+        lifecycleScope.launch(Dispatchers.Default) {
+            runCatching { vocalRemover.warmUp() }
+                .onFailure { Log.w(TAG, "Preparazione modello fallita", it) }
+        }
         audioPlayer = AudioPlayer(this)
 
         setupUi()

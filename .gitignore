@@ -18,6 +18,7 @@ app/release/
 # Modelli ML (troppo grandi per git — usa Git LFS se necessario)
 *.tflite
 *.onnx
+google-services.json
 
 # Python
 __pycache__/

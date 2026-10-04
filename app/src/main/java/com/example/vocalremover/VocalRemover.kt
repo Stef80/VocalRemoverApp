@@ -13,6 +13,7 @@ import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.coroutineContext
 
 data class StereoPcm(
@@ -25,13 +26,14 @@ data class StereoPcm(
 
     val size: Int
         get() = left.size
-
-    fun downmix(): FloatArray = FloatArray(size) { i ->
-        (left[i] + right[i]) * 0.5f
-    }
 }
 
-class VocalRemover(context: Context) {
+class VocalRemover(
+    context: Context,
+    private val backend: ExecutionBackend = ExecutionBackend.fromId(BuildConfig.EXECUTION_BACKEND)
+) {
+
+    private class Loaded(val session: OrtSession, val inputName: String, val outputName: String)
 
     companion object {
         private const val TAG = "VocalRemover"
@@ -75,9 +77,34 @@ class VocalRemover(context: Context) {
     private val mdxStft = MdxStftProcessor(nFft = N_FFT, hopLength = HOP_LENGTH, dimF = DIM_F)
     private val chunker = MdxChunker(nFft = N_FFT, hopLength = HOP_LENGTH, dimT = DIM_T, overlap = OVERLAP)
     private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
-    private val session: OrtSession
-    private val inputName: String
-    private val outputName: String
+    private val appContext: Context = context.applicationContext
+    private val loadLock = Any()
+    private val loadedRef = AtomicReference<Loaded?>(null)
+    @Volatile private var closed = false
+
+    /**
+     * Sessione creata al primo uso, fuori dal thread UI: con QNN la prima compilazione
+     * del grafo HTP richiede decine di secondi e bloccherebbe onCreate (ANR).
+     */
+    private val loaded: Loaded
+        get() = loadedRef.get() ?: synchronized(loadLock) {
+            loadedRef.get() ?: run {
+                check(!closed) { "VocalRemover già chiuso" }
+                val session = createSession(appContext)
+                val created = Loaded(
+                    session,
+                    session.inputNames.iterator().next(),
+                    session.outputNames.iterator().next()
+                )
+                loadedRef.set(created)
+                // close() concorrente durante la compilazione: chiude chi arriva per secondo.
+                if (closed) {
+                    loadedRef.getAndSet(null)?.session?.close()
+                    error("VocalRemover chiuso durante la creazione della sessione")
+                }
+                created
+            }
+        }
 
     /** Mappa riutilizzata tra chunk per evitare una HashMap per iterazione. */
     private val inputMap = HashMap<String, OnnxTensor>(1)
@@ -120,7 +147,12 @@ class VocalRemover(context: Context) {
             ByteBuffer.allocateDirect(size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
     }
 
-    init {
+    /** Prepara la sessione in anticipo; va chiamato da un thread in background. */
+    fun warmUp() {
+        loaded
+    }
+
+    private fun createSession(context: Context): OrtSession {
         val modelFile = File(context.cacheDir, MODEL_CACHE_FILE)
         if (!modelFile.exists()) {
             Log.i(TAG, "Copio il modello ONNX in cache: ${modelFile.absolutePath}")
@@ -128,7 +160,6 @@ class VocalRemover(context: Context) {
                 copyAssetStreamToFile(input, modelFile)
             }
         }
-        val backend = ExecutionBackend.fromId(BuildConfig.EXECUTION_BACKEND)
         Log.i(
             TAG,
             "Execution backend=${backend.id}, modelCache=${modelFile.absolutePath}, modelBytes=${modelFile.length()}"
@@ -156,14 +187,13 @@ class VocalRemover(context: Context) {
             Log.d(TAG, "Provider disponibili: ${OrtEnvironment.getAvailableProviders()}")
         }
         val sessionStart = System.currentTimeMillis()
-        session = if (backend == ExecutionBackend.QNN) {
+        val session = if (backend == ExecutionBackend.QNN) {
             createQnnSession(context, modelFile, options)
         } else {
             env.createSession(modelFile.absolutePath, options)
         }
         Log.i(TAG, "Sessione ONNX creata in ${System.currentTimeMillis() - sessionStart} ms")
-        inputName = session.inputNames.iterator().next()
-        outputName = session.outputNames.iterator().next()
+        return session
     }
 
     /** Carica il grafo HTP compilato se presente, altrimenti compila e lo salva. */
@@ -296,10 +326,11 @@ class VocalRemover(context: Context) {
         workspace.inputBuffer.rewind()
         val t2 = System.nanoTime()   // tensore di input pronto per ONNX
 
-        inputMap[inputName] = workspace.inputTensor
-        outputMap[outputName] = workspace.outputTensor
+        val model = loaded
+        inputMap[model.inputName] = workspace.inputTensor
+        outputMap[model.outputName] = workspace.outputTensor
         // Output "pinned": ORT scrive direttamente in workspace.outputBuffer.
-        session.run(inputMap, outputMap).use { }
+        model.session.run(inputMap, outputMap).use { }
         val tRun = System.nanoTime()
 
         workspace.outputBuffer.rewind()
@@ -408,7 +439,6 @@ class VocalRemover(context: Context) {
                 while (j < jMax) {
                     val dstBase = j * dstStride
                     var i = i0
-                    val srcBase = i * cols + j
                     while (i < iMax) {
                         dest[dstBase + i] = src[channelOffset + i * cols + j]
                         i++
@@ -430,5 +460,8 @@ class VocalRemover(context: Context) {
         }
     }
 
-    fun close() = session.close()
+    fun close() {
+        closed = true
+        loadedRef.getAndSet(null)?.session?.close()
+    }
 }

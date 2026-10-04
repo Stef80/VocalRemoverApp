@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -13,6 +14,14 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Codice del benchmark condiviso tra test JVM e androidTest: non finisce nell'APK dell'app.
+    sourceSets {
+        getByName("test").java.srcDir("src/benchmarkShared/java")
+        getByName("androidTest").java.srcDir("src/benchmarkShared/java")
     }
 
     flavorDimensions += "backend"
@@ -100,4 +109,14 @@ dependencies {
 
     // Test unitari JVM (nessun test esisteva finora nel modulo)
     testImplementation("junit:junit:4.13.2")
+
+    // Benchmark su dispositivo (BackendBenchmarkTest): eseguibile in locale o su Firebase Test Lab
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Import the Firebase BoM
+
+    implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
+
 }
