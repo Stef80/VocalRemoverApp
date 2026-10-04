@@ -167,7 +167,8 @@ class VocalRemover(
         val options = OrtSession.SessionOptions().apply {
             when (backend) {
                 // Default ORT: XNNPACK misurato più lento su Realme (7,2–8,0 s/chunk contro
-                // 5,8–6,2 s) e in crash nativo dentro session.run su OPPO.
+                // 5,8–6,2 s) e in crash nativo dentro session.run su OPPO. Thread intra-op e
+                // quantizzazione INT8 misurati senza guadagni utili (vedi copilot-instructions).
                 ExecutionBackend.CPU -> Unit
                 ExecutionBackend.WEBGPU -> addWebGPU(mapOf(
                     "device_id" to "0",
@@ -199,7 +200,7 @@ class VocalRemover(
     /** Carica il grafo HTP compilato se presente, altrimenti compila e lo salva. */
     private fun createQnnSession(context: Context, modelFile: File, options: OrtSession.SessionOptions): OrtSession {
         val dir = context.filesDir
-        @Suppress("DEPRECATION")
+       // @Suppress("DEPRECATION")
         val installKey = context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
         val ctxFile = QnnConfig.contextCacheFile(dir, installKey)
         QnnConfig.staleContextCaches(dir.list()?.toList().orEmpty(), ctxFile.name)

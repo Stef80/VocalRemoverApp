@@ -6,15 +6,21 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.MediaCodec
 import android.media.MediaFormat
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.MediaExtractorCompat
 import android.net.Uri
 import android.os.Looper
 import android.util.Log
-import kotlinx.coroutines.*
-import kotlin.coroutines.coroutineContext
-import java.nio.ByteBuffer
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.MediaExtractorCompat
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.nio.ByteOrder
+import kotlin.coroutines.coroutineContext
 
 /**
  * Gestisce la decodifica del file audio, il processo di rimozione vocale
@@ -42,6 +48,7 @@ class AudioPlayer(private val context: Context) {
 
     val isPlaying: Boolean get() = audioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING
     val isReady: Boolean get() = processedPcm != null
+    val processedStereo: StereoPcm? get() = processedPcm
 
     fun loadProcessedStereo(stereoPcm: StereoPcm) {
         check(Looper.myLooper() == Looper.getMainLooper()) {

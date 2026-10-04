@@ -35,4 +35,12 @@ object RecordingFileNaming {
     }
 
     fun rawCaptureName(displayName: String): String = "${sanitize(displayName)}_capture"
+
+    fun instrumentalName(sourceDisplayName: String?): String {
+        val baseName = sourceDisplayName.orEmpty().trim().let { name ->
+            val dot = name.lastIndexOf('.')
+            if (dot >= 0) name.substring(0, dot) else name
+        }
+        return "${sanitize(baseName)}_strumentale"
+    }
 }

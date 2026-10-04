@@ -56,4 +56,26 @@ class RecordingFileNamingTest {
             RecordingFileNaming.rawCaptureName("My Song")
         )
     }
+
+    @Test
+    fun `instrumentalName strips extension and appends instrumental suffix`() {
+        assertEquals(
+            "My Song_strumentale",
+            RecordingFileNaming.instrumentalName("My Song.mp3")
+        )
+    }
+
+    @Test
+    fun `instrumentalName keeps inner dots and sanitizes invalid characters`() {
+        assertEquals(
+            "Artist - Song v1.2_A_B_strumentale",
+            RecordingFileNaming.instrumentalName("Artist - Song v1.2_A:B.flac")
+        )
+    }
+
+    @Test
+    fun `instrumentalName falls back to generic name when source name is missing`() {
+        assertEquals("Registrazione_strumentale", RecordingFileNaming.instrumentalName(null))
+        assertEquals("Registrazione_strumentale", RecordingFileNaming.instrumentalName(".mp3"))
+    }
 }

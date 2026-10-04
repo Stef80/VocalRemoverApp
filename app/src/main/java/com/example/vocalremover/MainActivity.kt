@@ -77,6 +77,9 @@ class MainActivity : AppCompatActivity() {
     private var processingCaptureOutputPath: String? = null
     private var captureProcessingJob: Job? = null
     private var discardCaptureWorkOnCancellation = false
+    // Nome con cui salvare automaticamente il risultato del brano scelto da file;
+    // null per i flussi di cattura, che hanno un proprio salvataggio.
+    private var pendingAutoSaveName: String? = null
 
     // ── Launcher file picker ─────────────────────────────────────────────────
     private val pickAudioLauncher = registerForActivityResult(
@@ -445,9 +448,16 @@ class MainActivity : AppCompatActivity() {
             binding.tvTotalTime.text = formatMs(audioPlayer.durationMs)
             setPlayerEnabled(true)
             Toast.makeText(this, "Elaborazione completata!", Toast.LENGTH_SHORT).show()
+            val autoSaveName = pendingAutoSaveName
+            pendingAutoSaveName = null
+            val processed = audioPlayer.processedStereo
+            if (autoSaveName != null && processed != null) {
+                autoSaveProcessedFile(processed, autoSaveName)
+            }
         }
 
         audioPlayer.onError = { msg ->
+            pendingAutoSaveName = null
             binding.tvStatus.text = "Errore: $msg"
             binding.progressBar.visibility = android.view.View.GONE
             Toast.makeText(this, "Errore: $msg", Toast.LENGTH_LONG).show()
@@ -463,17 +473,39 @@ class MainActivity : AppCompatActivity() {
         binding.tvStatus.text = "Avvio elaborazione..."
 
         // Mostra nome file
+        var sourceName: String? = null
         contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
             null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) {
                 val name = cursor.getString(0)
+                sourceName = name
                 binding.tvFileName.text = name
                 Log.i(TAG, "Brano selezionato: name=$name")
             }
         }
+        pendingAutoSaveName = RecordingFileNaming.instrumentalName(sourceName)
 
         lifecycleScope.launch {
             audioPlayer.loadAndProcess(uri, vocalRemover)
+        }
+    }
+
+    private fun autoSaveProcessedFile(instrumental: StereoPcm, displayName: String) {
+        binding.tvStatus.text = "Salvataggio brano elaborato..."
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    RecordingSaver.saveProcessedStereoAsWav(this@MainActivity, instrumental, displayName)
+                }
+                binding.tvStatus.text = "Salvato in Music/VocalRemover/$displayName.wav"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e(TAG, "Salvataggio automatico brano elaborato fallito", error)
+                val msg = error.message ?: "Impossibile salvare il brano elaborato."
+                binding.tvStatus.text = "Errore salvataggio: $msg"
+                Toast.makeText(this@MainActivity, "Errore salvataggio: $msg", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -606,6 +638,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun processStoppedCapture(result: CaptureTerminalResult) {
+        pendingAutoSaveName = null
         val temporaryWav = captureFileIfSafe(result.outputPath)
         if (temporaryWav == null) {
             discardCaptureWork(
@@ -755,6 +788,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun restoreSavedCapture(result: CaptureTerminalResult) {
+        pendingAutoSaveName = null
         val savedUri = result.savedOutputUri
             ?.takeIf { Uri.parse(it).scheme == "content" }
             ?.let(Uri::parse)

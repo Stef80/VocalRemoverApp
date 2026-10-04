@@ -48,7 +48,14 @@ ship in the app APK.
 
 The `cpuDebug` and `webgpuDebug` flavors use separate application IDs and model caches. The
 `cpu` flavor uses ORT's default CPU EP: XNNPACK was measured slower on Realme RMX3301 and crashed
-natively inside `session.run` on OPPO CPH2791. Keep
+natively inside `session.run` on OPPO CPH2791. Also measured without useful gains (2026-10, do not
+retry without a new idea):
+- Intra-op thread count (`setIntraOpNumThreads`): on Test Lab, the best explicit value was within
+  ~4% of ORT's default on Galaxy A16 (Exynos 1330) and slower on Galaxy S24 (Exynos 2400).
+- INT8 quantization (onnxruntime.quantization, calibrated on MUSDB18 7 s excerpts): static QDQ
+  drops SDR vs the true accompaniment from 14.8 to 9–10 dB (any exclusion of edge layers/MatMul);
+  dynamic MatMul-only drops it to 13.5 dB. The model needs quantization-aware training for INT8.
+Keep
 CPU as the quality baseline; WebGPU is device-specific and must not be selected based on speed
 alone. To compare, run both builds on the same device with the same input audio and listen to
 both results. Release code keeps only warning/error logs; add temporary `Log.i` timing locally
