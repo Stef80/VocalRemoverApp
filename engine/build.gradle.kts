@@ -1,52 +1,34 @@
 plugins {
-    alias(libs.plugins.android.application)
+    alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
-    id("com.google.gms.google-services")
 }
 
 android {
     namespace = "com.example.vocalremover"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.example.vocalremover"
         minSdk = 26
-        targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
-
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // Codice del benchmark condiviso tra test JVM e androidTest: non finisce nell'APK dell'app.
+    // Codice del benchmark condiviso tra questi test JVM e l'androidTest di :ui: non finisce nell'APK.
     sourceSets {
         getByName("test").java.srcDir("src/benchmarkShared/java")
-        getByName("androidTest").java.srcDir("src/benchmarkShared/java")
     }
 
     flavorDimensions += "backend"
     productFlavors {
         create("cpu") {
             dimension = "backend"
-            applicationIdSuffix = ".cpu"
             buildConfigField("String", "EXECUTION_BACKEND", "\"cpu\"")
         }
         create("webgpu") {
             dimension = "backend"
-            applicationIdSuffix = ".webgpu"
             buildConfigField("String", "EXECUTION_BACKEND", "\"webgpu\"")
         }
         create("qnn") {
             dimension = "backend"
-            applicationIdSuffix = ".qnn"
             buildConfigField("String", "EXECUTION_BACKEND", "\"qnn\"")
-        }
-    }
-
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -62,20 +44,6 @@ android {
     buildFeatures {
         viewBinding = true
         buildConfig = true
-    }
-
-    // Exclude conflicting native libs (es. tra onnxruntime e altre dipendenze)
-    packaging {
-        jniLibs {
-            pickFirsts += listOf("**/libc++_shared.so")
-        }
-    }
-}
-
-androidComponents {
-    onVariants(selector().withFlavor("backend" to "qnn")) { variant ->
-        // QNN: le librerie devono essere estratte su disco perché il DSP carichi le Skel.
-        variant.packaging.jniLibs.useLegacyPackaging.set(true)
     }
 }
 
@@ -109,14 +77,4 @@ dependencies {
 
     // Test unitari JVM (nessun test esisteva finora nel modulo)
     testImplementation("junit:junit:4.13.2")
-
-    // Benchmark su dispositivo (BackendBenchmarkTest): eseguibile in locale o su Firebase Test Lab
-    androidTestImplementation("androidx.test:runner:1.6.2")
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-
-    // Import the Firebase BoM
-
-    implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
-
 }

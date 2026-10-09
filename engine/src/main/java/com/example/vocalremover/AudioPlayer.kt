@@ -125,7 +125,6 @@ class AudioPlayer(private val context: Context) {
         }
     }
 
-    @OptIn(UnstableApi::class)
     private fun decodeAudio(uri: Uri): StereoPcm? {
         val start = System.currentTimeMillis()
         val extractor = MediaExtractorCompat(context)

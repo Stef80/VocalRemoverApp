@@ -29,21 +29,12 @@
         <package android:name="com.amazon.mp3" />
     </queries>
 
-    <application
-        android:allowBackup="true"
-        android:largeHeap="true"
-        android:label="@string/app_name"
-        android:theme="@style/Theme.VocalRemover"
-        android:supportsRtl="true">
+    <application>
 
+        <!-- Schermata XML precedente: il launcher è ora la MainActivity Compose di :ui -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-
             <!-- Gestione file audio condivisi via altre app -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

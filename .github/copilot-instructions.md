@@ -11,39 +11,50 @@ commits made automatically — that behavior is retired.
 
 ## Model file setup (required before build)
 
-`app/src/main/assets/vocal_remover.onnx` (~59MB, UVR-MDX-NET-Inst_HQ_5) is **not tracked in git** (excluded via `.gitignore`, `*.onnx`) because it exceeds GitHub's 100MB file size limit. It must be downloaded manually and placed at that exact path before building — see `README.md` for the download link and steps. Do not attempt to `git add -f` this file; it will be rejected by GitHub's push size check.
+`engine/src/main/assets/vocal_remover.onnx` (~59MB, UVR-MDX-NET-Inst_HQ_5) is **not tracked in git** (excluded via `.gitignore`, `*.onnx`) because it exceeds GitHub's 100MB file size limit. It must be downloaded manually and placed at that exact path before building — see `README.md` for the download link and steps. Do not attempt to `git add -f` this file; it will be rejected by GitHub's push size check.
 
 ## Build, test, and lint
 
-This repository is an Android app built with Gradle Kotlin DSL (`build.gradle.kts`, `app/build.gradle.kts`).
+This repository is an Android app built with Gradle Kotlin DSL (`build.gradle.kts`, `ui/build.gradle.kts`,
+`engine/build.gradle.kts`). Modules:
+- `:ui` — the **application** module: produces the APKs, owns the launcher (Compose
+  `com.stef.vocalremover.ui.MainActivity`, namespace `com.example.vocalremover.ui`), the
+  `cpu`/`webgpu`/`qnn` flavors with their `applicationIdSuffix`, QNN legacy JNI packaging,
+  `google-services.json`, and the on-device `androidTest` benchmark. Depends on `:engine`.
+- `:engine` — Android **library** (namespace `com.example.vocalremover`): decoding, ONNX inference,
+  capture, the model asset, JVM unit tests, and the previous XML/ViewBinding
+  `com.example.vocalremover.MainActivity` (opened from the Compose launcher until it is migrated and
+  removed). Has the same `backend` flavors (selecting ORT dependency and `BuildConfig.EXECUTION_BACKEND`).
+  `:engine` must never depend on `:ui`.
+- Both use `compileSdk = 37` (needed by Compose BOM 2026.08+ / lifecycle-compose 2.11); `targetSdk` stays 36.
 
 Use Gradle from the repo root:
 
 ```bash
-gradle :app:assembleCpuDebug :app:assembleWebgpuDebug :app:assembleQnnDebug
-gradle :app:lintCpuDebug :app:lintWebgpuDebug :app:lintQnnDebug
-gradle :app:testCpuDebugUnitTest :app:testWebgpuDebugUnitTest :app:testQnnDebugUnitTest
+gradle :ui:assembleCpuDebug :ui:assembleWebgpuDebug :ui:assembleQnnDebug
+gradle :ui:lintCpuDebug :ui:lintWebgpuDebug :ui:lintQnnDebug :engine:lintCpuDebug
+gradle :engine:testCpuDebugUnitTest :engine:testWebgpuDebugUnitTest :engine:testQnnDebugUnitTest
 ```
 
 Run a single unit test method:
 
 ```bash
-gradle :app:testCpuDebugUnitTest :app:testWebgpuDebugUnitTest --tests "com.example.vocalremover.YourTestClass.yourTestMethod"
+gradle :engine:testCpuDebugUnitTest :engine:testWebgpuDebugUnitTest --tests "com.example.vocalremover.YourTestClass.yourTestMethod"
 ```
 
 If instrumentation tests are added/updated:
 
 ```bash
-gradle :app:connectedCpuDebugAndroidTest :app:connectedWebgpuDebugAndroidTest :app:connectedQnnDebugAndroidTest
+gradle :ui:connectedCpuDebugAndroidTest :ui:connectedWebgpuDebugAndroidTest :ui:connectedQnnDebugAndroidTest
 ```
 
-`BackendBenchmarkTest` (androidTest) is the on-device benchmark: it processes a deterministic
+`BackendBenchmarkTest` (`ui/src/androidTest`) is the on-device benchmark: it processes a deterministic
 synthetic stereo signal with the flavor's backend, compares it against an in-process CPU-EP
 reference (`VocalRemover(context, ExecutionBackend.CPU)`), and fails on NaN/Inf, silence, or
 SNR < 20 dB. It reports a JSON line (logcat tag `VRBenchmark` and
 `files/benchmark/report-<flavor>.json`), runnable on Firebase Test Lab (see `README.md`). Its pure
 helpers (`BenchmarkMetrics`, `SyntheticStereoSignal`, `BenchmarkReport`) live in
-`app/src/benchmarkShared/java`, a source dir shared by `test` and `androidTest` only, so they never
+`engine/src/benchmarkShared/java`, a source dir shared by `:engine` `test` and `:ui` `androidTest` only, so they never
 ship in the app APK.
 
 The `cpuDebug` and `webgpuDebug` flavors use separate application IDs and model caches. The
@@ -64,10 +75,10 @@ when benchmarking and remove it afterwards.
 The `qnn` flavor (Qualcomm NPU/HTP, `onnxruntime-android-qnn:1.24.3`, which cannot share an APK
 with `onnxruntime-android`, hence per-flavor dependencies) needs all of the following. Each one was
 required on Realme RMX3301 (SM8450, HTP v69):
-- `app/src/qnn/AndroidManifest.xml` declares `<uses-native-library android:name="libcdsprpc.so">`.
+- `engine/src/qnn/AndroidManifest.xml` declares `<uses-native-library android:name="libcdsprpc.so">`.
   Without it the HTP stub fails with `libcdsprpc.so not found` and ORT silently falls back to CPU.
   Do not override `ADSP_LIBRARY_PATH`.
-- Legacy JNI packaging (`useLegacyPackaging`) is enabled only for the qnn variant, so that
+- Legacy JNI packaging (`useLegacyPackaging`, in `ui/build.gradle.kts`) is enabled only for the qnn variant, so that
   `libQnnHtp.so` and the Skel libraries exist on disk in `nativeLibraryDir`.
 - `setSymbolicDimensionValue("batch_size", 1)`: the model has a symbolic batch dimension and no
   `value_info`, and without this QNN rejects every node with "Cannot get shape".
@@ -80,7 +91,7 @@ Measured: ONNX run ~245 ms/chunk (CPU ~6 s), outputPeak 0.48093 vs CPU 0.48072, 
 
 The app pipeline is:
 
-1. `MainActivity` handles permissions, file selection, UI state, and player controls.
+1. `:ui` `MainActivity` (Compose) is the launcher; for now it only opens the previous `:engine` `MainActivity`, which handles permissions, file selection, UI state, and player controls.
 2. `AudioPlayer` decodes input audio (`MediaExtractor` + `MediaCodec`) into true stereo float PCM at 44.1kHz (`StereoPcm`, no premature downmix), calls vocal-removal processing, and downmixes to mono only right before playback with `AudioTrack`.
 3. `VocalRemover` runs model inference with **ONNX Runtime** (`onnxruntime-android:1.24.3`) using the **UVR-MDX-NET-Inst_HQ_5** ONNX model (`vocal_remover.onnx`, ~59MB, stereo-aware, replaces the previous Open-Unmix model as of the 2026-09 migration — benchmarking on real audio showed 3-4x lower vocal cross-leak, 0.02-0.03 vs 0.08-0.14):
    - The model outputs the **instrumental's complex spectrum directly** (no ratio-mask step, unlike the old Open-Unmix pipeline) — ONNX inference output goes straight into ISTFT.

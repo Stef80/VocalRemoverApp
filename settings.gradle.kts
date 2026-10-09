@@ -19,4 +19,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "VocalRemoverApp"
-include(":app")
+include(":engine")
+include(":ui")

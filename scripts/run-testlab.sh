@@ -32,8 +32,8 @@ cd "$ROOT"
 
 CAP="$(tr '[:lower:]' '[:upper:]' <<< "${FLAVOR:0:1}")${FLAVOR:1}"
 APP_ID="com.example.vocalremover.$FLAVOR"
-APP_APK="app/build/outputs/apk/$FLAVOR/debug/app-$FLAVOR-debug.apk"
-TEST_APK="app/build/outputs/apk/androidTest/$FLAVOR/debug/app-$FLAVOR-debug-androidTest.apk"
+APP_APK="ui/build/outputs/apk/$FLAVOR/debug/ui-$FLAVOR-debug.apk"
+TEST_APK="ui/build/outputs/apk/androidTest/$FLAVOR/debug/ui-$FLAVOR-debug-androidTest.apk"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 RESULTS_DIR="vr-benchmark-$FLAVOR-$STAMP"
 OUT_DIR="build/testlab/$RESULTS_DIR"
@@ -61,14 +61,14 @@ if (( DRY_RUN )); then
   exit 0
 fi
 
-if [[ -f app/google-services.json ]] && ! grep -q "\"$APP_ID\"" app/google-services.json; then
-  echo "ERRORE: app/google-services.json non contiene il client $APP_ID e la build fallirebbe." >&2
+if [[ -f ui/google-services.json ]] && ! grep -q "\"$APP_ID\"" ui/google-services.json; then
+  echo "ERRORE: ui/google-services.json non contiene il client $APP_ID e la build fallirebbe." >&2
   echo "Registra $APP_ID nella console Firebase e riscarica il file, oppure rimuovi il plugin google-services." >&2
   exit 1
 fi
 
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
-  gradle -q ":app:assemble${CAP}Debug" ":app:assemble${CAP}DebugAndroidTest"
+  gradle -q ":ui:assemble${CAP}Debug" ":ui:assemble${CAP}DebugAndroidTest"
 fi
 
 mkdir -p "$OUT_DIR"

@@ -8,24 +8,28 @@ Il modello `vocal_remover.onnx` (~59MB, UVR-MDX-NET-Inst_HQ_5) **non è incluso 
 
 1. Scarica `UVR-MDX-NET-Inst_HQ_5.onnx` da [Ultimate Vocal Remover models](https://github.com/TRvlvr/model_repo/releases) (o dal repository/hub da cui è stato ottenuto).
 2. Rinominalo in `vocal_remover.onnx`.
-3. Copialo in `app/src/main/assets/vocal_remover.onnx`.
+3. Copialo in `engine/src/main/assets/vocal_remover.onnx`.
 
 Il file è elencato in `.gitignore` (pattern `*.onnx`): resterà sul tuo disco ma non verrà mai committato per errore. Ogni sviluppatore/macchina di build deve ripetere questo passaggio dopo il clone.
 
 ## Build
 
 ```bash
-gradle :app:assembleCpuDebug :app:assembleWebgpuDebug :app:assembleQnnDebug
+gradle :ui:assembleCpuDebug :ui:assembleWebgpuDebug :ui:assembleQnnDebug
 ```
+
+Moduli: `:ui` è il modulo application (APK, launcher Compose `MainActivity`, flavor con gli
+application ID); `:engine` è la library con decodifica, inferenza ONNX, cattura e la schermata XML
+precedente, con gli stessi flavor `cpu`/`webgpu`/`qnn` che selezionano il backend.
 
 ## Confronto CPU/WebGPU
 
 Installa entrambe le build debug sullo stesso dispositivo per confrontare i backend.
-Gli APK sono in `app/build/outputs/apk/cpu/debug/` e `app/build/outputs/apk/webgpu/debug/`.
+Gli APK sono in `ui/build/outputs/apk/cpu/debug/` e `ui/build/outputs/apk/webgpu/debug/`.
 Hanno application ID distinti (`.cpu` e `.webgpu`), quindi cache separate. Usa lo stesso file
 audio e lo stesso modello per entrambe. Ascolta e confronta prima la CPU; se WebGPU rovina l'audio, non usarlo su
 quel dispositivo. Nessun backend viene promosso in base alla sola velocità. I test unitari si
-eseguono con `gradle :app:testCpuDebugUnitTest :app:testWebgpuDebugUnitTest`.
+eseguono con `gradle :engine:testCpuDebugUnitTest :engine:testWebgpuDebugUnitTest`.
 
 ## Flavor QNN (NPU Snapdragon)
 
@@ -49,13 +53,13 @@ Valori misurati: Realme qnn 3,3 s (CPU 85 s), SNR 63,5 dB; OPPO webgpu 21 s (CPU
 In locale, con il telefono collegato via adb:
 
 ```bash
-gradle :app:connectedQnnDebugAndroidTest      # oppure Cpu / Webgpu
+gradle :ui:connectedQnnDebugAndroidTest      # oppure Cpu / Webgpu
 # argomenti opzionali: -Pandroid.testInstrumentationRunnerArguments.durationSec=10
 #                      -Pandroid.testInstrumentationRunnerArguments.minSnrDb=25
 ```
 
 Il risultato è una riga JSON nel logcat (tag `VRBenchmark`). Con Gradle viene copiato anche in
-`app/build/outputs/connected_android_test_additional_output/<flavor>DebugAndroidTest/connected/<dispositivo>/`
+`ui/build/outputs/connected_android_test_additional_output/<flavor>DebugAndroidTest/connected/<dispositivo>/`
 (Gradle disinstalla l'app a fine test). Con `adb shell am instrument` resta invece in
 `/sdcard/Android/data/com.example.vocalremover.<flavor>/files/benchmark/report-<flavor>.json`.
 Con qnn su installazione pulita `sessionLoadMs` include la compilazione HTP (~50 s, una tantum).
@@ -73,11 +77,11 @@ DEVICES="frankel:36 r0q:36" DURATION_SEC=10 scripts/run-testlab.sh webgpu
 Piano Spark: 5 test fisici al giorno, uno per dispositivo. Equivalente manuale:
 
 ```bash
-gradle :app:assembleQnnDebug :app:assembleQnnDebugAndroidTest
+gradle :ui:assembleQnnDebug :ui:assembleQnnDebugAndroidTest
 gcloud firebase test android models list            # elenco dei modelli disponibili
 gcloud firebase test android run --type instrumentation \
-  --app  app/build/outputs/apk/qnn/debug/app-qnn-debug.apk \
-  --test app/build/outputs/apk/androidTest/qnn/debug/app-qnn-debug-androidTest.apk \
+  --app  ui/build/outputs/apk/qnn/debug/ui-qnn-debug.apk \
+  --test ui/build/outputs/apk/androidTest/qnn/debug/ui-qnn-debug-androidTest.apk \
   --device model=<MODELLO>,version=<API> --device model=<ALTRO>,version=<API> \
   --environment-variables durationSec=20 \
   --directories-to-pull /sdcard/Android/data/com.example.vocalremover.qnn/files \
