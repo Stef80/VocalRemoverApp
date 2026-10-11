@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.VocalRemover.Launcher" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">#19263B</item>
+        <item name="android:statusBarColor">#19263B</item>
+        <item name="android:navigationBarColor">#19263B</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

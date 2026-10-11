@@ -8,12 +8,14 @@ local.properties
 *.iml
 *.iws
 *.ipr
+.superpowers/
 
 # Android
 app/release/
 *.apk
 *.aab
 *.keystore
+*.log
 
 # Modelli ML (troppo grandi per git — usa Git LFS se necessario)
 *.tflite

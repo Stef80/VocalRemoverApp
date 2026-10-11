@@ -9,9 +9,13 @@ would be committed and why, but leave the actual commit action to the user to
 run themselves. This applies even if earlier turns in the same session show
 commits made automatically — that behavior is retired.
 
-## Model file setup (required before build)
+## Model file setup
 
-`engine/src/main/assets/vocal_remover.onnx` (~59MB, UVR-MDX-NET-Inst_HQ_5) is **not tracked in git** (excluded via `.gitignore`, `*.onnx`) because it exceeds GitHub's 100MB file size limit. It must be downloaded manually and placed at that exact path before building — see `README.md` for the download link and steps. Do not attempt to `git add -f` this file; it will be rejected by GitHub's push size check.
+ONNX assets are **not tracked in git** (`*.onnx` is ignored). `VocalRemover.MODEL_ASSET`
+currently loads `engine/src/main/assets/vocal_remover_fp32.onnx`. The README setup still
+mentions `vocal_remover.onnx`; verify the filename against `MODEL_ASSET` when changing
+model setup, and keep the README aligned. See `README.md` for the model download source.
+Do not force-add model files; keep them local.
 
 ## Build, test, and lint
 
@@ -66,11 +70,9 @@ retry without a new idea):
 - INT8 quantization (onnxruntime.quantization, calibrated on MUSDB18 7 s excerpts): static QDQ
   drops SDR vs the true accompaniment from 14.8 to 9–10 dB (any exclusion of edge layers/MatMul);
   dynamic MatMul-only drops it to 13.5 dB. The model needs quantization-aware training for INT8.
-Keep
-CPU as the quality baseline; WebGPU is device-specific and must not be selected based on speed
-alone. To compare, run both builds on the same device with the same input audio and listen to
-both results. Release code keeps only warning/error logs; add temporary `Log.i` timing locally
-when benchmarking and remove it afterwards.
+Keep CPU as the quality baseline; WebGPU is device-specific and must not be selected based on
+speed alone. Compare backends on the same device with the same input and listen to both results.
+Follow the existing logging pattern and remove temporary benchmark instrumentation after use.
 
 The `qnn` flavor (Qualcomm NPU/HTP, `onnxruntime-android-qnn:1.24.3`, which cannot share an APK
 with `onnxruntime-android`, hence per-flavor dependencies) needs all of the following. Each one was
@@ -93,7 +95,8 @@ The app pipeline is:
 
 1. `:ui` `MainActivity` (Compose) is the launcher; for now it only opens the previous `:engine` `MainActivity`, which handles permissions, file selection, UI state, and player controls.
 2. `AudioPlayer` decodes input audio (`MediaExtractor` + `MediaCodec`) into true stereo float PCM at 44.1kHz (`StereoPcm`, no premature downmix), calls vocal-removal processing, and downmixes to mono only right before playback with `AudioTrack`.
-3. `VocalRemover` runs model inference with **ONNX Runtime** (`onnxruntime-android:1.24.3`) using the **UVR-MDX-NET-Inst_HQ_5** ONNX model (`vocal_remover.onnx`, ~59MB, stereo-aware, replaces the previous Open-Unmix model as of the 2026-09 migration — benchmarking on real audio showed 3-4x lower vocal cross-leak, 0.02-0.03 vs 0.08-0.14):
+3. For system-audio capture, the engine activity obtains MediaProjection consent and starts `SystemAudioCaptureService`; the service writes captured stereo PCM to a temporary WAV, and the activity consumes the terminal result, reads the WAV, and coordinates processing/saving.
+4. `VocalRemover` runs model inference with **ONNX Runtime** (`onnxruntime-android:1.24.3`) using the stereo-aware **UVR-MDX-NET-Inst_HQ_5** ONNX model (`vocal_remover_fp32.onnx`):
    - The model outputs the **instrumental's complex spectrum directly** (no ratio-mask step, unlike the old Open-Unmix pipeline) — ONNX inference output goes straight into ISTFT.
    - `MdxStftProcessor` implements the model's exact **centered/reflect-padded STFT/ISTFT** convention (`n_fft=5120`, `hop_length=1024`, `dim_f=2560` frequency-bin crop) required by MDX-Net. Since `n_fft=5120 = 5·1024` is not a power of 2, it uses `MixedRadixFft` (radix-5 × table-driven radix-2, ~15x faster than Bluestein); other lengths (e.g. `n_fft=6` in tests) fall back to `BluesteinFft`. The pipeline calls `forwardStereoInto`/`inverseStereoInto`, which pack L and R into one complex FFT per frame (`z = L + i·R`) and must stay numerically identical to two per-channel `forwardInto`/`inverseInto` calls (see `MdxStftStereoTest`).
    - `MdxChunker` implements the reference tool's outer 25%-overlap waveform chunking (fixed `chunkSize = hopLength*(dimT-1)` samples per ONNX call, since the graph has a fixed `dim_t=256` frame constraint), overlap-added with a **symmetric** Hann window (`numpy.hanning` formula, denominator `len-1` — distinct from the STFT's **periodic** Hann window, denominator `nFft`). `processStereo` drives both channels in lockstep since the model takes a single joint 4-channel tensor (`[L_re, L_im, R_re, R_im]`) per chunk, not two independent per-channel passes.
@@ -106,6 +109,8 @@ Related offline tooling (deprecated, kept for reference only):
 
 ## Key repository conventions
 
+- For user-visible static text in the active `:ui` Compose app (labels, messages, and warnings), use Android string resources in `ui/src/main/res/values/strings.xml` and read them with `stringResource`; do not hard-code UI copy or use `.properties`. Do not modify the legacy UI in `:engine` for this rule; it is slated for removal.
+- Every `:ui` Compose screen shows the app logo (`R.drawable.logo_corallo_blu`) next to its title.
 - Keep audio constants aligned across components:
   - `MdxStftProcessor`/`MdxChunker` (`nFft=5120`, `hopLength=1024`, `dimF=2560`, `dimT=256`, `overlap=0.25`) — these match the UVR-MDX-NET-Inst_HQ_5 ONNX model's expected I/O contract exactly (`[batch,4,2560,256]` tensor, channel order `[L_re,L_im,R_re,R_im]`).
   - `AudioPlayer` decode/processing is **true stereo** float PCM at 44.1kHz (`StereoPcm`); downmix to mono happens only immediately before `AudioTrack` playback.

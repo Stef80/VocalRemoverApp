@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Vocal Remover</string>
+
+    <string name="splash_title">Vocal Remover</string>
+    <string name="splash_tagline">KARAOKE</string>
+
+    <string name="player_now_playing">In riproduzione</string>
+    <string name="player_track_placeholder">Titolo canzone - Artista</string>
+    <string name="player_sample_lyrics">Testo della canzone di esempio…</string>
+    <string name="player_open_legacy_screen">Apri schermata attuale</string>
+    <string name="player_import_song">Importa canzone</string>
+
+    <string name="import_title">Importa canzone</string>
+    <string name="import_select_file">Seleziona un file</string>
+    <string name="import_browse_storage">Sfoglia memoria</string>
+    <string name="import_supported_formats">Formati: MP3, WAV, FLAC, M4A</string>
+    <string name="import_record_section">O registra da altre app</string>
+    <string name="import_capture_title">Registra audio interno</string>
+    <string name="import_capture_description">Cattura l\'audio in riproduzione da altre app</string>
+    <string name="import_capture_start">Avvia</string>
+    <string name="import_options_section">Opzioni elaborazione</string>
+    <string name="import_quality_title">Qualità rimozione voce</string>
+    <string name="import_quality_fast">Veloce</string>
+    <string name="import_quality_balanced">Bilanciata</string>
+    <string name="import_quality_studio">Studio</string>
+    <string name="import_option_auto_save">Salva automaticamente in memoria</string>
+    <string name="import_option_normalize">Normalizza volume</string>
+    <string name="import_option_reverb">Aggiungi leggero riverbero</string>
+    <string name="import_process_now">✨  Elabora ora</string>
+    <string name="import_preview_not_connected">Anteprima: funzione non ancora collegata</string>
+
+    <string name="control_back_description">Indietro</string>
+    <string name="control_play_description">Riproduci</string>
+    <string name="control_pause_description">Pausa</string>
+    <string name="control_forward_description">Avanti</string>
+</resources>
