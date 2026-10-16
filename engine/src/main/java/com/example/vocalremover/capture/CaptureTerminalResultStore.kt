@@ -4,19 +4,22 @@ import android.content.Context
 import android.os.Process
 import java.util.UUID
 
-internal enum class CaptureTerminalKind {
+// Public (not internal): consumed cross-module by :ui's BubbleOverlayService,
+// which needs to peek/clear a stale claim without owning the full processing
+// state machine below (kept internal, :engine-only).
+enum class CaptureTerminalKind {
     BLOCKED,
     STOPPED,
     ERROR
 }
 
-internal enum class CaptureTerminalState {
+enum class CaptureTerminalState {
     PENDING,
     PROCESSING,
     SAVED
 }
 
-internal data class CaptureTerminalResult(
+data class CaptureTerminalResult(
     val id: String,
     val kind: CaptureTerminalKind,
     val outputPath: String? = null,
@@ -93,7 +96,7 @@ internal data class CaptureProcessingLease(
  * Stores the one terminal capture outcome until an activity finishes its durable handoff.
  * Broadcasts are only a prompt to read this record, not the source of capture data.
  */
-internal class CaptureTerminalResultStore(context: Context) {
+class CaptureTerminalResultStore(context: Context) {
     companion object {
         private const val PREFERENCES_NAME = "capture_terminal_result"
         private const val KEY_ID = "id"
@@ -177,7 +180,7 @@ internal class CaptureTerminalResultStore(context: Context) {
      * another activity in this process remains unavailable until that activity
      * releases it after cancellation; a dead process's lease is reclaimed.
      */
-    fun acquireStoppedResult(ownerId: String): CaptureProcessingLease? = synchronized(lock) {
+    internal fun acquireStoppedResult(ownerId: String): CaptureProcessingLease? = synchronized(lock) {
         val result = readLocked() ?: return@synchronized null
         if (result.kind != CaptureTerminalKind.STOPPED) return@synchronized null
 

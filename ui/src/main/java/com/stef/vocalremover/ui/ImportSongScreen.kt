@@ -1,5 +1,10 @@
 package com.stef.vocalremover.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
@@ -20,6 +25,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -33,6 +39,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +49,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -49,7 +57,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.example.vocalremover.ui.R
+import com.stef.vocalremover.ui.overlay.BubbleOverlayService
+import com.stef.vocalremover.ui.overlay.CaptureOverlayStatus
 import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 import kotlinx.coroutines.launch
 
@@ -92,11 +103,43 @@ fun ImportSongScreen(onBack: () -> Unit = {}) {
     var options by rememberSaveable(stateSaver = ImportOptions.Saver) { mutableStateOf(ImportOptions()) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val previewMessage = stringResource(R.string.import_preview_not_connected)
+    val overlayPermissionMessage = stringResource(R.string.import_overlay_permission_required)
+    val captureRequiresAndroid10Message = stringResource(R.string.import_capture_requires_android_10)
     val showPreviewMessage: () -> Unit = {
         scope.launch {
             snackbarHostState.currentSnackbarData?.dismiss()
             snackbarHostState.showSnackbar(previewMessage)
+        }
+    }
+    val startCaptureWidget: () -> Unit = {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            scope.launch {
+                snackbarHostState.currentSnackbarData?.dismiss()
+                snackbarHostState.showSnackbar(captureRequiresAndroid10Message)
+            }
+        } else if (BubbleOverlayService.canShowOverlay(context)) {
+            ContextCompat.startForegroundService(context, Intent(context, BubbleOverlayService::class.java))
+            // Nasconde l'app (senza chiuderla) così resta visibile solo il bubble sopra
+            // la home o l'app da registrare. moveTaskToBack mantiene viva l'Activity, che
+            // il bubble riporta in primo piano a fine registrazione (FLAG_ACTIVITY_SINGLE_TOP).
+            context.findActivity()?.moveTaskToBack(true)
+        } else {
+            scope.launch {
+                snackbarHostState.currentSnackbarData?.dismiss()
+                snackbarHostState.showSnackbar(overlayPermissionMessage)
+            }
+            context.startActivity(BubbleOverlayService.overlayPermissionSettingsIntent(context))
+        }
+    }
+    // Riflette lo stato del widget flottante (unico scrittore: BubbleOverlayService),
+    // per poter avviare/fermare la stessa sessione di cattura anche da qui invece di
+    // dover per forza interagire con il bubble.
+    val isRecording by CaptureOverlayStatus.isRecording.collectAsState()
+    val stopCaptureWidget: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.startForegroundService(context, BubbleOverlayService.requestStopIntent(context))
         }
     }
 
@@ -119,7 +162,7 @@ fun ImportSongScreen(onBack: () -> Unit = {}) {
             Spacer(Modifier.height(24.dp))
             SectionTitle(R.string.import_record_section)
             Spacer(Modifier.height(8.dp))
-            CaptureCard(onStart = showPreviewMessage)
+            CaptureCard(isRecording = isRecording, onStart = startCaptureWidget, onStop = stopCaptureWidget)
            /* Spacer(Modifier.height(24.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
             Spacer(Modifier.height(16.dp))
@@ -220,7 +263,7 @@ private fun FilePickerCard(onBrowse: () -> Unit) {
 }
 
 @Composable
-private fun CaptureCard(onStart: () -> Unit) {
+private fun CaptureCard(isRecording: Boolean, onStart: () -> Unit, onStop: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -236,17 +279,28 @@ private fun CaptureCard(onStart: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = stringResource(R.string.import_capture_description),
+                        text = stringResource(
+                            if (isRecording) R.string.import_capture_recording else R.string.import_capture_description
+                        ),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (isRecording) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     )
                 }
             }
             Button(
-                onClick = onStart,
+                onClick = if (isRecording) onStop else onStart,
+                colors = if (isRecording) {
+                    ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                } else {
+                    ButtonDefaults.buttonColors()
+                },
                 modifier = Modifier.align(Alignment.End),
             ) {
-                Text(stringResource(R.string.import_capture_start))
+                Text(stringResource(if (isRecording) R.string.import_capture_stop else R.string.import_capture_start))
             }
         }
     }
@@ -334,4 +388,10 @@ private fun ImportSongScreenPreview() {
     VocalRemoverTheme {
         ImportSongScreen()
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

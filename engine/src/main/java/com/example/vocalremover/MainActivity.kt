@@ -6,7 +6,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionConfig
 import android.media.projection.MediaProjectionManager
@@ -25,11 +24,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.example.vocalremover.capture.CapturePackageDirectory
+import com.example.vocalremover.capture.CapturePackageSuggestions
+import com.example.vocalremover.capture.CaptureProcessingLease
 import com.example.vocalremover.capture.CaptureTerminalKind
 import com.example.vocalremover.capture.CaptureTerminalResult
 import com.example.vocalremover.capture.CaptureTerminalResultStore
 import com.example.vocalremover.capture.CaptureTerminalState
-import com.example.vocalremover.capture.CaptureProcessingLease
 import com.example.vocalremover.capture.RecordingFileNaming
 import com.example.vocalremover.capture.RecordingSaver
 import com.example.vocalremover.capture.SystemAudioCaptureService
@@ -51,9 +52,6 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "MainActivity"
         private const val STATE_PENDING_CAPTURE_TARGET_PACKAGE =
             "pending_capture_target_package"
-        private const val PREFS_CAPTURE_PACKAGE_PICKER = "capture_package_picker"
-        private const val KEY_RECENT_CAPTURE_PACKAGES = "recent_capture_packages"
-        private const val ANDROID_NAMESPACE = "http://schemas.android.com/apk/res/android"
     }
 
     private enum class CaptureUiState {
@@ -67,6 +65,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var vocalRemover: VocalRemover
     private lateinit var audioPlayer: AudioPlayer
+    private val capturePackageDirectory by lazy { CapturePackageDirectory(this) }
 
     private var isUserSeeking = false
     private var captureUiState = CaptureUiState.IDLE
@@ -307,36 +306,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupCapturePackageSuggestions() {
-        val recentPackages = readRecentCapturePackages()
-        val candidatePackages = readCaptureCandidatePackagesFromManifest()
-
-        // Solo i pacchetti dichiarati in <queries> nel manifest sono risolvibili
-        // da PackageManager su Android 11+; per gli altri getApplicationInfo
-        // lancia NameNotFoundException anche se installati.
-        val candidates = candidatePackages
-            .mapNotNull { packageName ->
-                val appInfo = try {
-                    packageManager.getApplicationInfo(packageName, ApplicationInfo.FLAG_INSTALLED)
-                } catch (_: PackageManager.NameNotFoundException) {
-                    null
-                }
-                appInfo?.takeIf { it.enabled }?.let { packageName to it }
-            }
-            .associate { (packageName, appInfo) ->
-                val label = packageManager.getApplicationLabel(appInfo)?.toString()?.trim()
-                val displayText = when {
-                    label.isNullOrBlank() -> packageName
-                    packageName == label -> packageName
-                    else -> "$label ($packageName)"
-                }
-                packageName to displayText
-            }
-
-        val orderedSuggestions = recentPackages
-            .filter { it in candidates }
-            .plus(candidates.keys.filter { it !in recentPackages }.sortedBy { candidates[it]?.lowercase() ?: it.lowercase() })
-            .distinct()
-            .mapNotNull { candidates[it] }
+        val orderedSuggestions = CapturePackageSuggestions.orderedDisplayTexts(
+            capturePackageDirectory.readRecentPackages(),
+            capturePackageDirectory.candidateDisplayNames()
+        )
 
         val autoCompleteView = binding.etCapturePackageName as AutoCompleteTextView
         val adapter = ContainsFilterAdapter(this, orderedSuggestions, autoCompleteView)
@@ -344,18 +317,17 @@ class MainActivity : AppCompatActivity() {
         autoCompleteView.setAdapter(adapter)
         autoCompleteView.setOnItemClickListener { _, _, position, _ ->
             val selectedText = adapter.getItem(position)?.toString() ?: return@setOnItemClickListener
-            val packageName = selectedText.substringAfterLast("(").trimEnd(')')
+            val packageName = CapturePackageSuggestions.packageNameFromDisplayText(selectedText)
             if (packageName.isNotBlank()) {
                 autoCompleteView.setText(packageName)
                 autoCompleteView.setSelection(packageName.length)
-                rememberCapturePackage(packageName)
+                capturePackageDirectory.rememberPackage(packageName)
             }
         }
         autoCompleteView.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) showCapturePackageDropdown(autoCompleteView)
         }
         autoCompleteView.setOnClickListener { showCapturePackageDropdown(autoCompleteView) }
-
     }
 
     private fun showCapturePackageDropdown(autoCompleteView: AutoCompleteTextView) {
@@ -369,63 +341,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
         autoCompleteView.showDropDown()
-    }
-
-    /**
-     * Legge i pacchetti dichiarati in <queries><package android:name="..."/></queries>
-     * direttamente dal proprio AndroidManifest.xml compilato: è l'unica fonte
-     * di verità, non esiste una lista duplicata in Kotlin. Se il parsing
-     * dovesse fallire, ritorna vuoto e il picker resta senza suggerimenti
-     * (l'utente può comunque scrivere il package a mano).
-     */
-    private fun readCaptureCandidatePackagesFromManifest(): List<String> {
-        var parser: android.content.res.XmlResourceParser? = null
-        return try {
-            parser = assets.openXmlResourceParser("AndroidManifest.xml")
-            val packages = mutableListOf<String>()
-            var insideQueries = false
-            var eventType = parser.eventType
-            while (eventType != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
-                when (eventType) {
-                    org.xmlpull.v1.XmlPullParser.START_TAG -> when (parser.name) {
-                        "queries" -> insideQueries = true
-                        "package" -> if (insideQueries) {
-                            parser.getAttributeValue(ANDROID_NAMESPACE, "name")?.let(packages::add)
-                        }
-                    }
-                    org.xmlpull.v1.XmlPullParser.END_TAG -> if (parser.name == "queries") {
-                        insideQueries = false
-                    }
-                }
-                eventType = parser.next()
-            }
-            packages
-        } catch (_: Exception) {
-            emptyList()
-        } finally {
-            parser?.close()
-        }
-    }
-
-    private fun readRecentCapturePackages(): List<String> {
-        val prefs = getSharedPreferences(PREFS_CAPTURE_PACKAGE_PICKER, MODE_PRIVATE)
-        return prefs.getString(KEY_RECENT_CAPTURE_PACKAGES, "")
-            ?.split('|')
-            ?.filter { it.isNotBlank() }
-            ?.distinct()
-            ?: emptyList()
-    }
-
-    private fun rememberCapturePackage(packageName: String) {
-        val normalized = packageName.trim()
-        if (normalized.isEmpty()) return
-
-        val prefs = getSharedPreferences(PREFS_CAPTURE_PACKAGE_PICKER, MODE_PRIVATE)
-        val recent = readRecentCapturePackages()
-            .filter { it != normalized }
-            .toMutableList()
-        recent.add(0, normalized)
-        prefs.edit().putString(KEY_RECENT_CAPTURE_PACKAGES, recent.take(10).joinToString("|")).apply()
     }
 
     private fun setupPlayerCallbacks() {
@@ -531,7 +446,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        rememberCapturePackage(packageName)
+        capturePackageDirectory.rememberPackage(packageName)
         pendingCaptureTargetPackageName = packageName
         setCaptureUiState(
             CaptureUiState.AWAITING_CONSENT,
@@ -896,11 +811,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun resolveTargetUid(packageName: String): Int? =
-        try {
-            packageManager.getApplicationInfo(packageName, ApplicationInfo.FLAG_INSTALLED).uid
-        } catch (_: PackageManager.NameNotFoundException) {
-            null
-        }
+        capturePackageDirectory.resolveTargetUid(packageName)
 
     private fun clearPendingCaptureTarget() {
         pendingCaptureTargetPackageName = null

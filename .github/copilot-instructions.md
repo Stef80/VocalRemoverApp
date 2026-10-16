@@ -120,5 +120,5 @@ Related offline tooling (deprecated, kept for reference only):
   - processing progress is emitted from `VocalRemover.removeVocals` and mapped in `MainActivity` to user-facing phase labels.
 - `AudioPlayer` is the orchestration boundary for decode/process/playback:
   - callbacks (`onProgress`, `onReady`, `onError`, `onPlaybackPositionChanged`) are the integration contract with `MainActivity`.
-- The app currently uses direct string literals in UI/status updates (mostly Italian) in Kotlin/layout rather than fully centralized string resources; follow the existing pattern unless the task is a localization refactor.
+- In `:ui`, never hard-code user-visible text (labels, statuses, Toasts, error messages, notifications): put it in `ui/src/main/res/values/strings.xml` and read it with `stringResource` (composables) or `getString` (Activities/Services). Only the legacy `:engine` UI still uses direct string literals (mostly Italian); leave it as is.
 - `onnxruntime-android` must stay at **1.24.3+** to satisfy the Android 16KB page size requirement (both `libonnxruntime.so` and `libonnxruntime4j_jni.so` must be 16KB-aligned; versions before 1.23.0 have a misaligned JNI lib). Verify alignment via `unzip -p app-debug.apk lib/arm64-v8a/lib*.so > /tmp/lib.so && readelf -lW /tmp/lib.so | awk '/LOAD/{print $NF}' | sort -u` (look for `0x4000`).

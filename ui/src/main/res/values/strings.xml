@@ -19,6 +19,10 @@
     <string name="import_capture_title">Registra audio interno</string>
     <string name="import_capture_description">Cattura l\'audio in riproduzione da altre app</string>
     <string name="import_capture_start">Avvia</string>
+    <string name="import_capture_stop">Ferma registrazione</string>
+    <string name="import_capture_recording">Registrazione in corso…</string>
+    <string name="import_overlay_permission_required">Concedi il permesso di sovrapposizione per usare il widget di registrazione, poi riprova.</string>
+    <string name="import_capture_requires_android_10">La cattura audio richiede Android 10 o versioni successive.</string>
     <string name="import_options_section">Opzioni elaborazione</string>
     <string name="import_quality_title">Qualità rimozione voce</string>
     <string name="import_quality_fast">Veloce</string>
@@ -34,4 +38,27 @@
     <string name="control_play_description">Riproduci</string>
     <string name="control_pause_description">Pausa</string>
     <string name="control_forward_description">Avanti</string>
+
+    <string name="bubble_status_idle">Scegli l\'app da registrare</string>
+    <string name="bubble_status_app_selected">Pronto a registrare %1$s</string>
+    <string name="bubble_status_awaiting_consent">In attesa di consenso…</string>
+    <string name="bubble_status_recording">Registrazione in corso…</string>
+    <string name="bubble_status_stopping">Arresto in corso…</string>
+    <string name="bubble_status_unknown_error">Errore sconosciuto</string>
+    <string name="bubble_action_stop_and_process">Ferma e elabora</string>
+    <string name="bubble_action_start_recording">Avvia registrazione</string>
+    <string name="bubble_error_capture_blocked">La sorgente non consente la cattura dell\'audio.</string>
+    <string name="bubble_error_capture_failed">Errore durante la cattura audio.</string>
+    <string name="bubble_error_overlay_unavailable">Permesso overlay non disponibile: impossibile mostrare il widget</string>
+    <string name="bubble_error_app_not_found">App sorgente non trovata: %1$s</string>
+    <string name="bubble_notification_channel_name">Widget di registrazione</string>
+    <string name="bubble_notification_title">Widget di registrazione attivo</string>
+    <string name="bubble_notification_text">Tocca il bubble sullo schermo per gestire la registrazione</string>
+    <string name="bubble_notification_close">Chiudi</string>
+
+    <string name="consent_error_record_audio_denied">Permesso microfono non concesso</string>
+    <string name="consent_error_notifications_denied">Permesso notifiche non concesso: registrazione non avviata</string>
+    <string name="consent_error_projection_denied">Consenso per la cattura audio non concesso</string>
+    <string name="consent_error_service_start_failed">Impossibile avviare il servizio di cattura</string>
+    <string name="consent_error_unsupported">Impossibile avviare la cattura audio su questo dispositivo</string>
 </resources>

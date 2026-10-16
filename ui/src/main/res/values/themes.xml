@@ -6,4 +6,15 @@
         <item name="android:navigationBarColor">#19263B</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+
+    <!-- Usato solo da MediaProjectionConsentActivity: un'Activity "trampolino"
+         (ComponentActivity, nessuna UI Compose propria) che deve solo mostrare
+         il dialog di sistema del consenso MediaProjection sopra il bubble
+         flottante. ComponentActivity non richiede un tema discendente di
+         AppCompat: si parte dal tema di sistema per la trasparenza. -->
+    <style name="Theme.VocalRemover.Transparent" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>

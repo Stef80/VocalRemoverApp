@@ -86,8 +86,12 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.compose.ui.tooling)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.savedstate)
 
     implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
+
+    testImplementation("junit:junit:4.13.2")
 
     // Benchmark su dispositivo (BackendBenchmarkTest): eseguibile in locale o su Firebase Test Lab
     androidTestImplementation("androidx.test:runner:1.6.2")
