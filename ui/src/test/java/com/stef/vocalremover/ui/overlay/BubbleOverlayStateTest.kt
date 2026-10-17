@@ -20,6 +20,19 @@ class BubbleOverlayStateTest {
     }
 
     @Test
+    fun `selecting another app from app selected replaces the target`() {
+        val next = BubbleOverlayTransitions.selectApp(
+            BubbleOverlayState(BubbleOverlayPhase.APP_SELECTED, "com.example.target", 1234),
+            packageName = "com.other",
+            targetUid = 5678
+        )
+        assertEquals(
+            BubbleOverlayState(BubbleOverlayPhase.APP_SELECTED, "com.other", 5678),
+            next
+        )
+    }
+
+    @Test
     fun `selecting an app while recording is rejected`() {
         val current = BubbleOverlayState(BubbleOverlayPhase.RECORDING, "com.example.target", 1234)
         assertNull(BubbleOverlayTransitions.selectApp(current, "com.other", 5678))

@@ -25,10 +25,14 @@
             </intent-filter>
         </activity>
 
+        <!-- taskAffinity vuota: avviata dal bubble con FLAG_ACTIVITY_NEW_TASK, apre un task
+             tutto suo invece di riportare in primo piano il task dell'app nascosto
+             (moveTaskToBack) e lasciarlo visibile alla sua chiusura. -->
         <activity
             android:name="com.stef.vocalremover.ui.overlay.MediaProjectionConsentActivity"
             android:exported="false"
             android:excludeFromRecents="true"
+            android:taskAffinity=""
             android:theme="@style/Theme.VocalRemover.Transparent" />
 
         <service

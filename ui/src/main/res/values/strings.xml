@@ -45,8 +45,9 @@
     <string name="bubble_status_recording">Registrazione in corso…</string>
     <string name="bubble_status_stopping">Arresto in corso…</string>
     <string name="bubble_status_unknown_error">Errore sconosciuto</string>
+    <string name="bubble_hint_record">Registra</string>
+    <string name="bubble_hint_stop">Ferma</string>
     <string name="bubble_action_stop_and_process">Ferma e elabora</string>
-    <string name="bubble_action_start_recording">Avvia registrazione</string>
     <string name="bubble_error_capture_blocked">La sorgente non consente la cattura dell\'audio.</string>
     <string name="bubble_error_capture_failed">Errore durante la cattura audio.</string>
     <string name="bubble_error_overlay_unavailable">Permesso overlay non disponibile: impossibile mostrare il widget</string>

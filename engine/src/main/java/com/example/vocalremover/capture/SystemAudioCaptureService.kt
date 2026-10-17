@@ -1,11 +1,13 @@
 package com.example.vocalremover.capture
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
@@ -18,6 +20,7 @@ import android.os.IBinder
 import android.os.Looper
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -172,6 +175,15 @@ class SystemAudioCaptureService : Service() {
         var pcmBytesWritten = 0L
 
         try {
+            // I chiamanti lo verificano già, ma il permesso può essere revocato prima dell'avvio:
+            // senza, AudioRecord.Builder.build() lancia SecurityException.
+            if (
+                ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                throw CaptureException("Permesso di registrazione audio non concesso")
+            }
+
             val config = AudioPlaybackCaptureConfiguration.Builder(projection)
                 .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                 .addMatchingUsage(AudioAttributes.USAGE_GAME)

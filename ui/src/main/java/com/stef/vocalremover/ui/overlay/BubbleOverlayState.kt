@@ -35,7 +35,11 @@ object BubbleOverlayTransitions {
         packageName: String,
         targetUid: Int
     ): BubbleOverlayState? =
-        if (current.phase == BubbleOverlayPhase.IDLE || current.phase == BubbleOverlayPhase.ERROR) {
+        // APP_SELECTED è ammesso per cambiare app (click lungo sul bubble collassato).
+        if (current.phase == BubbleOverlayPhase.IDLE ||
+            current.phase == BubbleOverlayPhase.APP_SELECTED ||
+            current.phase == BubbleOverlayPhase.ERROR
+        ) {
             BubbleOverlayState(BubbleOverlayPhase.APP_SELECTED, packageName, targetUid)
         } else {
             null
