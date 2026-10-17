@@ -49,15 +49,57 @@ class BubbleOverlayStateTest {
     }
 
     @Test
-    fun `starting the recording only works while awaiting consent`() {
+    fun `consent moves to listening only while awaiting consent`() {
         val awaiting = BubbleOverlayState(BubbleOverlayPhase.AWAITING_CONSENT, "com.a", 1)
         assertEquals(
-            BubbleOverlayState(BubbleOverlayPhase.RECORDING, "com.a", 1),
-            BubbleOverlayTransitions.startRecording(awaiting)
+            BubbleOverlayState(BubbleOverlayPhase.LISTENING, "com.a", 1),
+            BubbleOverlayTransitions.startListening(awaiting)
         )
         assertNull(
-            BubbleOverlayTransitions.startRecording(
+            BubbleOverlayTransitions.startListening(
                 BubbleOverlayState(BubbleOverlayPhase.APP_SELECTED, "com.a", 1)
+            )
+        )
+    }
+
+    @Test
+    fun `detected audio moves from listening to recording`() {
+        val listening = BubbleOverlayState(BubbleOverlayPhase.LISTENING, "com.a", 1)
+        assertEquals(
+            BubbleOverlayState(BubbleOverlayPhase.RECORDING, "com.a", 1),
+            BubbleOverlayTransitions.audioDetected(listening)
+        )
+        assertNull(
+            BubbleOverlayTransitions.audioDetected(
+                BubbleOverlayState(BubbleOverlayPhase.CANCELLING, "com.a", 1)
+            )
+        )
+    }
+
+    @Test
+    fun `cancelling only works while listening`() {
+        val listening = BubbleOverlayState(BubbleOverlayPhase.LISTENING, "com.a", 1)
+        assertEquals(
+            BubbleOverlayState(BubbleOverlayPhase.CANCELLING, "com.a", 1),
+            BubbleOverlayTransitions.cancelListening(listening)
+        )
+        assertNull(
+            BubbleOverlayTransitions.cancelListening(
+                BubbleOverlayState(BubbleOverlayPhase.RECORDING, "com.a", 1)
+            )
+        )
+    }
+
+    @Test
+    fun `cancelled returns to app selected keeping the chosen app`() {
+        val cancelling = BubbleOverlayState(BubbleOverlayPhase.CANCELLING, "com.a", 1)
+        assertEquals(
+            BubbleOverlayState(BubbleOverlayPhase.APP_SELECTED, "com.a", 1),
+            BubbleOverlayTransitions.cancelled(cancelling)
+        )
+        assertNull(
+            BubbleOverlayTransitions.cancelled(
+                BubbleOverlayState(BubbleOverlayPhase.LISTENING, "com.a", 1)
             )
         )
     }
@@ -73,14 +115,20 @@ class BubbleOverlayStateTest {
     }
 
     @Test
-    fun `stopped resets to idle only from stopping`() {
-        val stopping = BubbleOverlayState(BubbleOverlayPhase.STOPPING, "com.a", 1)
-        assertEquals(
-            BubbleOverlayState(BubbleOverlayPhase.IDLE),
-            BubbleOverlayTransitions.stopped(stopping)
-        )
+    fun `stopped resets to idle from any active capture phase`() {
+        for (phase in listOf(
+            BubbleOverlayPhase.STOPPING,
+            BubbleOverlayPhase.RECORDING,
+            BubbleOverlayPhase.LISTENING,
+            BubbleOverlayPhase.CANCELLING
+        )) {
+            assertEquals(
+                BubbleOverlayState(BubbleOverlayPhase.IDLE),
+                BubbleOverlayTransitions.stopped(BubbleOverlayState(phase, "com.a", 1))
+            )
+        }
         assertNull(
-            BubbleOverlayTransitions.stopped(BubbleOverlayState(BubbleOverlayPhase.RECORDING, "com.a", 1))
+            BubbleOverlayTransitions.stopped(BubbleOverlayState(BubbleOverlayPhase.APP_SELECTED, "com.a", 1))
         )
     }
 

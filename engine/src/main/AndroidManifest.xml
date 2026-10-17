@@ -32,16 +32,16 @@
     <application>
 
         <!-- Schermata XML precedente: il launcher è ora la MainActivity Compose di :ui -->
-        <activity
+<!--        <activity
             android:name=".MainActivity"
             android:exported="true">
-            <!-- Gestione file audio condivisi via altre app -->
+            &lt;!&ndash; Gestione file audio condivisi via altre app &ndash;&gt;
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="audio/*" />
             </intent-filter>
-        </activity>
+        </activity>-->
 
         <service
             android:name=".capture.SystemAudioCaptureService"

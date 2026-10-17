@@ -25,7 +25,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -41,7 +40,6 @@ class SystemAudioCaptureService : Service() {
         private const val CHANNEL_COUNT = 2
         private const val BYTES_PER_SAMPLE = 2
         private const val BYTES_PER_FRAME = CHANNEL_COUNT * BYTES_PER_SAMPLE
-        private const val SILENCE_CHECK_MS = 500
         private const val MAX_READ_BUFFER_SIZE = 16 * 1024
 
         const val EXTRA_RESULT_CODE = "result_code"
@@ -57,6 +55,9 @@ class SystemAudioCaptureService : Service() {
             "com.example.vocalremover.action.SYSTEM_AUDIO_CAPTURE_STOPPED"
         const val ACTION_CAPTURE_ERROR =
             "com.example.vocalremover.action.SYSTEM_AUDIO_CAPTURE_ERROR"
+        /** Inviato una sola volta, quando dopo l'ascolto arriva il primo audio dalla sorgente. */
+        const val ACTION_CAPTURE_RECORDING_STARTED =
+            "com.example.vocalremover.action.SYSTEM_AUDIO_CAPTURE_RECORDING_STARTED"
         const val ACTION_CAPTURE_PROCESSING_AVAILABLE =
             "com.example.vocalremover.action.SYSTEM_AUDIO_CAPTURE_PROCESSING_AVAILABLE"
     }
@@ -276,15 +277,21 @@ class SystemAudioCaptureService : Service() {
         }
     }
 
+    /**
+     * Legge finché l'utente non ferma la cattura o finché [PlaybackActivityGate] non
+     * chiude la registrazione: si resta in ascolto fino al primo audio dell'app sorgente,
+     * poi si registra fino a un silenzio prolungato (fine del brano).
+     */
     private fun captureLoop(record: AudioRecord, writer: WavFileWriter): Long {
         val bufferSize = (record.bufferSizeInFrames * BYTES_PER_FRAME)
             .coerceIn(BYTES_PER_FRAME, MAX_READ_BUFFER_SIZE)
         val readBuffer = ByteArray(bufferSize)
-        val silenceCheckBytes =
-            SAMPLE_RATE * CHANNEL_COUNT * BYTES_PER_SAMPLE * SILENCE_CHECK_MS / 1_000
-        val firstSamples = ByteArrayOutputStream(silenceCheckBytes)
-        var silenceCheckComplete = false
+        val gate = PlaybackActivityGate(SAMPLE_RATE, CHANNEL_COUNT)
         var pcmBytesWritten = 0L
+        val sink: (ByteArray, Int, Int) -> Unit = { buffer, offset, length ->
+            pcmBytesWritten = appendPcm(writer, buffer, offset, length, pcmBytesWritten)
+        }
+        var recordingStartedSent = false
 
         while (!stopRequested.get()) {
             val read = record.read(
@@ -295,34 +302,15 @@ class SystemAudioCaptureService : Service() {
             )
             when {
                 read > 0 -> {
-                    if (silenceCheckComplete) {
-                        pcmBytesWritten = appendPcm(
-                            writer,
-                            readBuffer,
-                            0,
-                            read,
-                            pcmBytesWritten
-                        )
-                    } else {
-                        firstSamples.write(readBuffer, 0, read)
-                        if (firstSamples.size() >= silenceCheckBytes) {
-                            val initialPcm = firstSamples.toByteArray()
-                            if (
-                                RmsSilenceDetector.isSilent(
-                                    bytesToFloatSamples(initialPcm.copyOf(silenceCheckBytes))
-                                )
-                            ) {
-                                throw CaptureBlockedException()
-                            }
-                            pcmBytesWritten = appendPcm(
-                                writer,
-                                initialPcm,
-                                0,
-                                initialPcm.size,
-                                pcmBytesWritten
-                            )
-                            silenceCheckComplete = true
-                        }
+                    val state = gate.process(readBuffer, 0, read, sink)
+                    if (gate.audioDetected && !recordingStartedSent) {
+                        recordingStartedSent = true
+                        sendBroadcast(Intent(ACTION_CAPTURE_RECORDING_STARTED).setPackage(packageName))
+                    }
+                    when (state) {
+                        PlaybackActivityGate.State.TIMED_OUT -> throw CaptureBlockedException()
+                        PlaybackActivityGate.State.FINISHED -> break
+                        else -> Unit
                     }
                 }
 
@@ -332,17 +320,7 @@ class SystemAudioCaptureService : Service() {
             }
         }
 
-        if (!silenceCheckComplete && firstSamples.size() > 0) {
-            val capturedBeforeStop = firstSamples.toByteArray()
-            pcmBytesWritten = appendPcm(
-                writer,
-                capturedBeforeStop,
-                0,
-                capturedBeforeStop.size,
-                pcmBytesWritten
-            )
-        }
-
+        gate.finish(sink)
         return pcmBytesWritten
     }
 
@@ -527,17 +505,6 @@ class SystemAudioCaptureService : Service() {
                 getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
             else -> getParcelableExtra(EXTRA_RESULT_DATA)
         }
-
-    private fun bytesToFloatSamples(bytes: ByteArray): FloatArray {
-        val samples = FloatArray(bytes.size / BYTES_PER_SAMPLE)
-        for (index in samples.indices) {
-            val byteIndex = index * BYTES_PER_SAMPLE
-            val value = ((bytes[byteIndex + 1].toInt() shl 8) or
-                (bytes[byteIndex].toInt() and 0xFF)).toShort()
-            samples[index] = value / 32_768f
-        }
-        return samples
-    }
 
     private fun Exception.userMessage(defaultMessage: String): String =
         message?.takeIf { it.isNotBlank() } ?: defaultMessage

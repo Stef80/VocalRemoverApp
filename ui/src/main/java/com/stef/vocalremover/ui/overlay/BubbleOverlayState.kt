@@ -10,6 +10,10 @@ enum class BubbleOverlayPhase {
     IDLE,
     APP_SELECTED,
     AWAITING_CONSENT,
+    /** Cattura attiva, in attesa che l'app sorgente inizi a riprodurre. */
+    LISTENING,
+    /** Annullamento richiesto durante l'ascolto: si attende la chiusura del servizio. */
+    CANCELLING,
     RECORDING,
     STOPPING,
     ERROR
@@ -52,9 +56,31 @@ object BubbleOverlayTransitions {
             null
         }
 
-    fun startRecording(current: BubbleOverlayState): BubbleOverlayState? =
+    fun startListening(current: BubbleOverlayState): BubbleOverlayState? =
         if (current.phase == BubbleOverlayPhase.AWAITING_CONSENT) {
+            current.copy(phase = BubbleOverlayPhase.LISTENING)
+        } else {
+            null
+        }
+
+    fun audioDetected(current: BubbleOverlayState): BubbleOverlayState? =
+        if (current.phase == BubbleOverlayPhase.LISTENING) {
             current.copy(phase = BubbleOverlayPhase.RECORDING)
+        } else {
+            null
+        }
+
+    fun cancelListening(current: BubbleOverlayState): BubbleOverlayState? =
+        if (current.phase == BubbleOverlayPhase.LISTENING) {
+            current.copy(phase = BubbleOverlayPhase.CANCELLING)
+        } else {
+            null
+        }
+
+    /** Fine dell'annullamento: l'app resta scelta, così un tap riavvia l'ascolto. */
+    fun cancelled(current: BubbleOverlayState): BubbleOverlayState? =
+        if (current.phase == BubbleOverlayPhase.CANCELLING) {
+            BubbleOverlayState(BubbleOverlayPhase.APP_SELECTED, current.packageName, current.targetUid)
         } else {
             null
         }
@@ -66,8 +92,17 @@ object BubbleOverlayTransitions {
             null
         }
 
+    /**
+     * Il servizio ha prodotto un file: oltre che dopo lo stop manuale accade anche
+     * per lo stop automatico a fine brano (da RECORDING) o se l'audio arriva a ridosso
+     * di un annullamento o prima del broadcast di inizio registrazione.
+     */
     fun stopped(current: BubbleOverlayState): BubbleOverlayState? =
-        if (current.phase == BubbleOverlayPhase.STOPPING) {
+        if (current.phase == BubbleOverlayPhase.STOPPING ||
+            current.phase == BubbleOverlayPhase.RECORDING ||
+            current.phase == BubbleOverlayPhase.LISTENING ||
+            current.phase == BubbleOverlayPhase.CANCELLING
+        ) {
             BubbleOverlayState(BubbleOverlayPhase.IDLE)
         } else {
             null

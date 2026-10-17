@@ -16,12 +16,17 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.annotation.RequiresApi
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -53,6 +58,12 @@ class BubbleOverlayService : Service() {
         private const val NOTIFICATION_ID = 4343
         private const val CLOSE_REQUEST_CODE = 1
         private const val ERROR_DISPLAY_MS = 3_000L
+        /** Se il servizio di cattura non conferma l'annullamento entro questo tempo si chiude comunque. */
+        private const val DISMISS_CANCEL_TIMEOUT_MS = 2_000L
+        private const val DISMISS_TARGET_BOTTOM_MARGIN_DP = 48
+        private const val DISMISS_HIT_RADIUS_DP = 72
+        /** Metà del lato del bubble collassato (64.dp in `BubbleOverlayContent`). */
+        private const val BUBBLE_RADIUS_DP = 32
         const val ACTION_CLOSE = "com.example.vocalremover.action.CLOSE_BUBBLE_OVERLAY"
         const val ACTION_REQUEST_STOP =
             "com.example.vocalremover.action.REQUEST_STOP_BUBBLE_CAPTURE"
@@ -80,6 +91,7 @@ class BubbleOverlayService : Service() {
     private lateinit var packageDirectory: CapturePackageDirectory
     private lateinit var layoutParams: WindowManager.LayoutParams
     private var composeView: ComposeView? = null
+    private var dismissView: ComposeView? = null
     private var overlayLifecycleOwner: OverlayLifecycleOwner? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val resultStore by lazy { CaptureTerminalResultStore(this) }
@@ -87,10 +99,26 @@ class BubbleOverlayService : Service() {
 
     private var state by mutableStateOf(BubbleOverlayState())
     private var suggestions by mutableStateOf(emptyList<String>())
+    private var dismissHovering by mutableStateOf(false)
+    private var draggingWithDismissTarget = false
+    /** Chiusura richiesta trascinando sulla X durante l'ascolto: si attende l'annullamento. */
+    private var closeAfterCancel = false
 
     private val captureResultReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            // Durante l'annullamento l'esito "blocked"/"error" è atteso (nessun audio
+            // acquisito): si chiude in silenzio invece di mostrare un errore.
+            if (state.phase == BubbleOverlayPhase.CANCELLING &&
+                intent.action != SystemAudioCaptureService.ACTION_CAPTURE_STOPPED &&
+                intent.action != SystemAudioCaptureService.ACTION_CAPTURE_RECORDING_STARTED
+            ) {
+                onCaptureCancelled()
+                if (closeAfterCancel) stopSelf()
+                return
+            }
             when (intent.action) {
+                SystemAudioCaptureService.ACTION_CAPTURE_RECORDING_STARTED ->
+                    transition { BubbleOverlayTransitions.audioDetected(it) }
                 SystemAudioCaptureService.ACTION_CAPTURE_STOPPED -> onCaptureStopped()
                 SystemAudioCaptureService.ACTION_CAPTURE_BLOCKED ->
                     onCaptureFailed(getString(R.string.bubble_error_capture_blocked))
@@ -107,7 +135,7 @@ class BubbleOverlayService : Service() {
         override fun onReceive(context: Context, intent: Intent) {
             val success = intent.getBooleanExtra(MediaProjectionConsentActivity.EXTRA_SUCCESS, false)
             if (success) {
-                transition { BubbleOverlayTransitions.startRecording(it) }
+                transition { BubbleOverlayTransitions.startListening(it) }
             } else {
                 onCaptureFailed(
                     intent.getStringExtra(MediaProjectionConsentActivity.EXTRA_MESSAGE)
@@ -129,6 +157,7 @@ class BubbleOverlayService : Service() {
             this,
             captureResultReceiver,
             IntentFilter().apply {
+                addAction(SystemAudioCaptureService.ACTION_CAPTURE_RECORDING_STARTED)
                 addAction(SystemAudioCaptureService.ACTION_CAPTURE_STOPPED)
                 addAction(SystemAudioCaptureService.ACTION_CAPTURE_BLOCKED)
                 addAction(SystemAudioCaptureService.ACTION_CAPTURE_ERROR)
@@ -157,6 +186,10 @@ class BubbleOverlayService : Service() {
         runCatching { unregisterReceiver(consentResultReceiver) }
         composeView?.disposeComposition()
         composeView?.let { runCatching { windowManager.removeView(it) } }
+        dismissView?.disposeComposition()
+        dismissView?.let { runCatching { windowManager.removeView(it) } }
+        dismissView = null
+        mainHandler.removeCallbacksAndMessages(null)
         overlayLifecycleOwner?.detach()
         composeView = null
         overlayLifecycleOwner = null
@@ -176,6 +209,8 @@ class BubbleOverlayService : Service() {
                         state = state,
                         suggestions = suggestions,
                         onDragDelta = ::moveBubble,
+                        onDragStart = ::onBubbleDragStart,
+                        onDragEnd = ::onBubbleDragEnd,
                         onPackagePicked = ::onAppSelected,
                         onStartRecording = ::requestMediaProjectionConsent,
                         onStopRecording = ::requestCaptureStop,
@@ -200,6 +235,7 @@ class BubbleOverlayService : Service() {
             windowManager.addView(view, layoutParams)
             overlayLifecycleOwner = owner
             composeView = view
+            addDismissTarget(owner)
         } catch (error: Exception) {
             // Overlay revocato tra la richiesta di avvio e questo punto (TOCTOU):
             // senza questo guard l'eccezione risalirebbe fuori da onCreate() e
@@ -220,7 +256,91 @@ class BubbleOverlayService : Service() {
         layoutParams.x += deltaX.toInt()
         layoutParams.y += deltaY.toInt()
         windowManager.updateViewLayout(view, layoutParams)
+        if (draggingWithDismissTarget) dismissHovering = isBubbleOverDismissTarget()
     }
+
+    /**
+     * Finestra con la X in basso al centro, non toccabile: solo grafica. Resta nascosta
+     * e compare durante il trascinamento del bubble.
+     */
+    private fun addDismissTarget(owner: OverlayLifecycleOwner) {
+        val view = ComposeView(this).apply {
+            setViewTreeLifecycleOwner(owner)
+            setViewTreeViewModelStoreOwner(owner)
+            setViewTreeSavedStateRegistryOwner(owner)
+            visibility = View.GONE
+            setContent {
+                VocalRemoverTheme {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        BubbleDismissTarget(hovering = dismissHovering)
+                    }
+                }
+            }
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            y = dpToPx(DISMISS_TARGET_BOTTOM_MARGIN_DP).toInt()
+        }
+        // Senza la X il bubble funziona lo stesso: un errore qui non deve chiudere il widget.
+        runCatching { windowManager.addView(view, params) }
+            .onSuccess { dismissView = view }
+    }
+
+    private fun onBubbleDragStart() {
+        if (!BubbleDismissPolicy.canDismiss(state.phase)) return
+        val target = dismissView ?: return
+        draggingWithDismissTarget = true
+        dismissHovering = false
+        target.visibility = View.VISIBLE
+    }
+
+    private fun onBubbleDragEnd() {
+        if (!draggingWithDismissTarget) return
+        val overTarget = isBubbleOverDismissTarget()
+        draggingWithDismissTarget = false
+        dismissHovering = false
+        dismissView?.visibility = View.GONE
+        // La registrazione può essere partita durante il trascinamento: si ricontrolla qui.
+        if (overTarget && BubbleDismissPolicy.canDismiss(state.phase)) dismissBubble()
+    }
+
+    private fun isBubbleOverDismissTarget(): Boolean {
+        val bubble = composeView ?: return false
+        val target = dismissView ?: return false
+        if (target.width == 0 || target.height == 0) return false
+        val bubbleLocation = IntArray(2).also { bubble.getLocationOnScreen(it) }
+        val targetLocation = IntArray(2).also { target.getLocationOnScreen(it) }
+        val bubbleRadius = dpToPx(BUBBLE_RADIUS_DP)
+        // Il bubble è in basso a sinistra della sua finestra (sopra c'è il fumetto).
+        return BubbleDismissPolicy.isOverTarget(
+            bubbleCenterX = bubbleLocation[0] + bubbleRadius,
+            bubbleCenterY = bubbleLocation[1] + bubble.height - bubbleRadius,
+            targetCenterX = targetLocation[0] + target.width / 2f,
+            targetCenterY = targetLocation[1] + target.height / 2f,
+            radius = dpToPx(DISMISS_HIT_RADIUS_DP)
+        )
+    }
+
+    /** Chiude il widget senza aprire l'app; in ascolto annulla prima la cattura. */
+    private fun dismissBubble() {
+        if (!BubbleDismissPolicy.mustCancelCapture(state.phase)) {
+            stopSelf()
+            return
+        }
+        closeAfterCancel = true
+        composeView?.visibility = View.GONE
+        requestCaptureStop()
+        mainHandler.postDelayed({ stopSelf() }, DISMISS_CANCEL_TIMEOUT_MS)
+    }
+
+    private fun dpToPx(dp: Int): Float = dp * resources.displayMetrics.density
 
     private fun currentSuggestions(): List<String> =
         CapturePackageSuggestions.orderedDisplayTexts(
@@ -252,9 +372,21 @@ class BubbleOverlayService : Service() {
         startActivity(MediaProjectionConsentActivity.createIntent(this, targetUid))
     }
 
+    /** In registrazione ferma ed elabora; in ascolto annulla senza produrre nulla. */
     private fun requestCaptureStop() {
-        transition { BubbleOverlayTransitions.requestStop(it) }
+        transition {
+            BubbleOverlayTransitions.requestStop(it) ?: BubbleOverlayTransitions.cancelListening(it)
+        }
         captureSessionController.stopCapture()
+    }
+
+    private fun onCaptureCancelled() {
+        resultStore.claim()?.let { claimedResult ->
+            if (claimedResult.kind != CaptureTerminalKind.STOPPED) {
+                resultStore.clearClaim(claimedResult.id)
+            }
+        }
+        transition { BubbleOverlayTransitions.cancelled(it) }
     }
 
     private fun onCaptureStopped() {
@@ -283,7 +415,10 @@ class BubbleOverlayService : Service() {
     private fun transition(update: (BubbleOverlayState) -> BubbleOverlayState?) {
         val next = update(state) ?: return
         state = next
-        CaptureOverlayStatus.update(next.phase == BubbleOverlayPhase.RECORDING)
+        // Anche l'ascolto è una cattura attiva: le altre schermate devono poterla fermare.
+        CaptureOverlayStatus.update(
+            next.phase == BubbleOverlayPhase.LISTENING || next.phase == BubbleOverlayPhase.RECORDING
+        )
     }
 
     private fun buildNotification(): Notification {

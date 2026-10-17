@@ -57,6 +57,8 @@ fun BubbleOverlayContent(
     state: BubbleOverlayState,
     suggestions: List<String>,
     onDragDelta: (Float, Float) -> Unit,
+    onDragStart: () -> Unit,
+    onDragEnd: () -> Unit,
     onPackagePicked: (String) -> Unit,
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
@@ -65,11 +67,13 @@ fun BubbleOverlayContent(
     // Il widget si apre espanso: il primo passo è sempre scegliere l'app da registrare.
     var expanded by rememberSaveable { mutableStateOf(true) }
     val isRecording = state.phase == BubbleOverlayPhase.RECORDING
+    val isListening = state.phase == BubbleOverlayPhase.LISTENING
 
     if (!expanded) {
         // Durante la registrazione pulsa un anello rosso attorno al bubble e un
         // pallino rosso in alto a destra, per segnalare all'utente che la cattura
         // è in corso anche quando il widget è collassato sopra un'altra app.
+        // In ascolto pulsa solo l'anello, nel colore terziario del tema.
         val pulseTransition = rememberInfiniteTransition(label = "bubble-recording-pulse")
         val pulseAlpha by pulseTransition.animateFloat(
             initialValue = 0.35f,
@@ -82,6 +86,7 @@ fun BubbleOverlayContent(
         )
         val hintText = when (state.phase) {
             BubbleOverlayPhase.APP_SELECTED -> stringResource(R.string.bubble_hint_record)
+            BubbleOverlayPhase.LISTENING -> stringResource(R.string.bubble_hint_listening)
             BubbleOverlayPhase.RECORDING -> stringResource(R.string.bubble_hint_stop)
             else -> null
         }
@@ -89,7 +94,11 @@ fun BubbleOverlayContent(
         Column(
             modifier = modifier
                 .pointerInput(Unit) {
-                    detectDragGestures { change, dragAmount ->
+                    detectDragGestures(
+                        onDragStart = { onDragStart() },
+                        onDragEnd = onDragEnd,
+                        onDragCancel = onDragEnd,
+                    ) { change, dragAmount ->
                         change.consume()
                         onDragDelta(dragAmount.x, dragAmount.y)
                     }
@@ -109,23 +118,25 @@ fun BubbleOverlayContent(
                     modifier = Modifier
                         .size(64.dp)
                         .then(
-                            if (isRecording) {
+                            if (isRecording || isListening) {
                                 Modifier.border(
                                     width = 3.dp,
-                                    color = Color.Red.copy(alpha = pulseAlpha),
+                                    color = (if (isRecording) Color.Red else MaterialTheme.colorScheme.tertiary)
+                                        .copy(alpha = pulseAlpha),
                                     shape = CircleShape
                                 )
                             } else {
                                 Modifier
                             }
                         )
-                        // Tap: con un'app scelta avvia la registrazione, durante la
-                        // registrazione la ferma, altrimenti riapre la card.
+                        // Tap: con un'app scelta avvia l'ascolto, in ascolto lo annulla,
+                        // durante la registrazione la ferma, altrimenti riapre la card.
                         // Click lungo: riapre sempre la card (es. per cambiare app).
                         .combinedClickable(
                             onClick = {
                                 when (state.phase) {
                                     BubbleOverlayPhase.APP_SELECTED -> onStartRecording()
+                                    BubbleOverlayPhase.LISTENING,
                                     BubbleOverlayPhase.RECORDING -> onStopRecording()
                                     else -> expanded = true
                                 }
@@ -279,15 +290,24 @@ private fun BubbleOverlayExpandedCard(
                 }
             }
 
-            // L'avvio della registrazione passa dal bubble collassato: qui resta solo lo stop.
-            if (state.phase == BubbleOverlayPhase.RECORDING) {
+            // L'avvio della registrazione passa dal bubble collassato: qui restano solo
+            // lo stop (in registrazione) e l'annullamento (in ascolto).
+            if (state.phase == BubbleOverlayPhase.RECORDING ||
+                state.phase == BubbleOverlayPhase.LISTENING
+            ) {
                 Spacer(Modifier.height(4.dp))
                 Button(
                     onClick = onStopRecording,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        stringResource(R.string.bubble_action_stop_and_process),
+                        stringResource(
+                            if (state.phase == BubbleOverlayPhase.RECORDING) {
+                                R.string.bubble_action_stop_and_process
+                            } else {
+                                R.string.bubble_action_cancel_listening
+                            }
+                        ),
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -302,6 +322,8 @@ private fun statusText(state: BubbleOverlayState): String = when (state.phase) {
     BubbleOverlayPhase.APP_SELECTED ->
         stringResource(R.string.bubble_status_app_selected, state.packageName.orEmpty())
     BubbleOverlayPhase.AWAITING_CONSENT -> stringResource(R.string.bubble_status_awaiting_consent)
+    BubbleOverlayPhase.LISTENING -> stringResource(R.string.bubble_status_listening)
+    BubbleOverlayPhase.CANCELLING -> stringResource(R.string.bubble_status_cancelling)
     BubbleOverlayPhase.RECORDING -> stringResource(R.string.bubble_status_recording)
     BubbleOverlayPhase.STOPPING -> stringResource(R.string.bubble_status_stopping)
     BubbleOverlayPhase.ERROR ->
