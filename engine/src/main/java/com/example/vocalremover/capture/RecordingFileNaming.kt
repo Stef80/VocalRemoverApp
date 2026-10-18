@@ -36,6 +36,11 @@ object RecordingFileNaming {
 
     fun rawCaptureName(displayName: String): String = "${sanitize(displayName)}_capture"
 
+    fun trimmedName(displayName: String): String = "${sanitize(displayName)}_tagliato"
+
+    /** Per un titolo scritto dall'utente: niente estensione da togliere (es. "Mr. Brightside"). */
+    fun instrumentalNameForTitle(title: String): String = "${sanitize(title)}_strumentale"
+
     fun instrumentalName(sourceDisplayName: String?): String {
         val baseName = sourceDisplayName.orEmpty().trim().let { name ->
             val dot = name.lastIndexOf('.')

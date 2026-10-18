@@ -175,6 +175,11 @@ class CaptureTerminalResultStore(context: Context) {
         result
     }
 
+    /** Reads the stopped capture without acquiring it (e.g. to show it in the editor). */
+    internal fun peekStoppedResult(): CaptureTerminalResult? = synchronized(lock) {
+        readLocked()?.takeIf { it.kind == CaptureTerminalKind.STOPPED }
+    }
+
     /**
      * Acquires stopped-capture work for one activity instance. Work owned by
      * another activity in this process remains unavailable until that activity

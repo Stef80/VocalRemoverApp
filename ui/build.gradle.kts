@@ -61,6 +61,16 @@ android {
         compose = true
     }
 
+    testOptions {
+        unitTests.all { test ->
+            // Robolectric scarica android-all (~200 MB) passando da java.io.tmpdir:
+            // su una /tmp piccola finisce lo spazio, quindi si usa una cartella sotto build/.
+            val tmp = layout.buildDirectory.dir("tmp/unitTest").get().asFile
+            test.doFirst { tmp.mkdirs() }
+            test.systemProperty("java.io.tmpdir", tmp.absolutePath)
+        }
+    }
+
     // Exclude conflicting native libs (es. tra onnxruntime e altre dipendenze)
     packaging {
         jniLibs {
@@ -92,6 +102,9 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
 
     testImplementation("junit:junit:4.13.2")
+    // Solo test: Robolectric per gli Uri di ImportViewModel, coroutines-test per il Main dispatcher
+    testImplementation("org.robolectric:robolectric:4.16")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 
     // Benchmark su dispositivo (BackendBenchmarkTest): eseguibile in locale o su Firebase Test Lab
     androidTestImplementation("androidx.test:runner:1.6.2")

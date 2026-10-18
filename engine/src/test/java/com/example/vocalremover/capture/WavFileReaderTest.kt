@@ -13,10 +13,10 @@ class WavFileReaderTest {
     @Test
     fun `reads a writer-generated stereo wav as normalized interleaved pcm`() {
         withTestFile("round_trip.wav") { file ->
-            writeStereoWav(
+            writePcm16StereoWav(
                 file = file,
                 sampleRate = 44100,
-                interleavedSamples = shortArrayOf(
+                interleaved = shortArrayOf(
                     32767, -32768,
                     0, 16384
                 )
@@ -53,6 +53,16 @@ class WavFileReaderTest {
     }
 
     @Test
+    fun `readInfo reports data offset, frame count and duration`() = withTempDir { dir ->
+        val file = File(dir, "a.wav").also { writePcm16StereoWav(it, rampSamples(44_100 * 2 + 441)) }
+        val info = WavFileReader.readInfo(file)
+        assertEquals(44L, info.dataOffset)
+        assertEquals(4, info.blockAlign)
+        assertEquals(88_641L, info.frameCount)
+        assertEquals(2010L, WavFileReader.durationMs(info))
+    }
+
+    @Test
     fun `rejects mono wav files`() {
         withTestFile("mono.wav") { file ->
             writeMonoWav(file)
@@ -66,10 +76,10 @@ class WavFileReaderTest {
     @Test
     fun `rejects wav files that are not 44100 hertz`() {
         withTestFile("wrong_sample_rate.wav") { file ->
-            writeStereoWav(
+            writePcm16StereoWav(
                 file = file,
                 sampleRate = 48000,
-                interleavedSamples = shortArrayOf(0, 0)
+                interleaved = shortArrayOf(0, 0)
             )
 
             assertUnsupported("44100") {
@@ -107,23 +117,11 @@ class WavFileReaderTest {
         }
     }
 
-    private fun writeStereoWav(file: File, sampleRate: Int, interleavedSamples: ShortArray) {
-        val writer = WavFileWriter(file, sampleRate = sampleRate, channelCount = 2)
-        writer.write(shortsToLittleEndian(interleavedSamples), 0, interleavedSamples.size * Short.SIZE_BYTES)
-        writer.close()
-    }
-
     private fun writeMonoWav(file: File) {
         val writer = WavFileWriter(file, sampleRate = 44100, channelCount = 1)
         val samples = shortArrayOf(0, 1024)
         writer.write(shortsToLittleEndian(samples), 0, samples.size * Short.SIZE_BYTES)
         writer.close()
-    }
-
-    private fun shortsToLittleEndian(samples: ShortArray): ByteArray {
-        val bytes = ByteBuffer.allocate(samples.size * Short.SIZE_BYTES).order(ByteOrder.LITTLE_ENDIAN)
-        samples.forEach(bytes::putShort)
-        return bytes.array()
     }
 
     private fun wavHeader(

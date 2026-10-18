@@ -6,12 +6,20 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.annotation.StringRes
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import com.example.vocalremover.MainActivity as LegacyMainActivity
+import com.example.vocalremover.processing.ProcessingError
+import com.example.vocalremover.ui.R
+import com.stef.vocalremover.ui.editor.TrimEditorScreen
 import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 import kotlinx.coroutines.delay
 
@@ -28,10 +36,14 @@ class MainActivity : ComponentActivity() {
      */
     private var openImportScreenRequest by mutableStateOf(false)
 
+    /** Cattura in attesa, editor ed elaborazione: sopravvive alle rotazioni dello schermo. */
+    private val importViewModel: ImportViewModel by viewModels { ImportViewModel.Factory }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (intent.consumeOpenImportScreenExtra()) {
             openImportScreenRequest = true
+            importViewModel.loadPendingCapture(openEditor = true)
         }
         val midnightBlue = android.graphics.Color.rgb(25, 38, 59)
         enableEdgeToEdge(
@@ -42,6 +54,16 @@ class MainActivity : ComponentActivity() {
             VocalRemoverTheme {
                 var showIntroduction by rememberSaveable { mutableStateOf(true) }
                 var showImportScreen by rememberSaveable { mutableStateOf(false) }
+                val importState by importViewModel.importState.collectAsState()
+                val editorState by importViewModel.editorState.collectAsState()
+                val playerState by importViewModel.playerState.collectAsState()
+                val snackbarHostState = remember { SnackbarHostState() }
+                LaunchedEffect(Unit) {
+                    importViewModel.events.collect { event ->
+                        snackbarHostState.currentSnackbarData?.dismiss()
+                        snackbarHostState.showSnackbar(getString(event.messageRes()))
+                    }
+                }
                 LaunchedEffect(showIntroduction) {
                     if (showIntroduction) {
                         delay(1_500L)
@@ -55,10 +77,33 @@ class MainActivity : ComponentActivity() {
                         openImportScreenRequest = false
                     }
                 }
+                val editor = editorState
                 if (showIntroduction) {
                     SplashScreen()
+                } else if (editor != null) {
+                    TrimEditorScreen(
+                        state = editor,
+                        onNameChange = importViewModel::onNameChange,
+                        onHandlesChange = importViewModel::onHandlesChange,
+                        onHandleReleased = importViewModel::onHandleReleased,
+                        onSeek = importViewModel::onSeek,
+                        onTogglePlayback = importViewModel::togglePlayback,
+                        onSave = importViewModel::saveEdit,
+                        onClose = importViewModel::closeEditor,
+                        snackbarHostState = snackbarHostState,
+                    )
                 } else if (showImportScreen) {
-                    ImportSongScreen(onBack = { showImportScreen = false })
+                    ImportSongScreen(
+                        state = importState,
+                        playerState = playerState,
+                        onBack = { showImportScreen = false },
+                        onEdit = importViewModel::openEditor,
+                        onDiscard = importViewModel::discard,
+                        onProcess = importViewModel::process,
+                        onTogglePlayback = importViewModel::togglePlayback,
+                        onSeek = importViewModel::onSeek,
+                        snackbarHostState = snackbarHostState,
+                    )
                 } else {
                     PlayerScreen(
                         onOpenImportScreen = { showImportScreen = true },
@@ -76,6 +121,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         if (intent.consumeOpenImportScreenExtra()) {
             openImportScreenRequest = true
+            importViewModel.loadPendingCapture(openEditor = true)
         }
     }
 
@@ -83,6 +129,21 @@ class MainActivity : ComponentActivity() {
         val requested = getBooleanExtra(EXTRA_OPEN_IMPORT_SCREEN, false)
         if (requested) removeExtra(EXTRA_OPEN_IMPORT_SCREEN)
         return requested
+    }
+
+    @StringRes
+    private fun ImportEvent.messageRes(): Int = when (this) {
+        ImportEvent.EditSaved -> R.string.import_event_edit_saved
+        ImportEvent.EditFailed -> R.string.import_event_edit_failed
+        ImportEvent.NameRequired -> R.string.import_event_name_required
+        ImportEvent.CaptureUnavailable -> R.string.import_event_capture_unavailable
+        ImportEvent.ProcessingDone -> R.string.import_event_processing_done
+        ImportEvent.PreviewUnavailable -> R.string.import_event_preview_unavailable
+        is ImportEvent.ProcessingFailed -> when (error) {
+            ProcessingError.DECODE_FAILED -> R.string.import_event_decode_failed
+            ProcessingError.INFERENCE_FAILED -> R.string.import_event_inference_failed
+            ProcessingError.SAVE_FAILED -> R.string.import_event_save_failed
+        }
     }
 
     companion object {

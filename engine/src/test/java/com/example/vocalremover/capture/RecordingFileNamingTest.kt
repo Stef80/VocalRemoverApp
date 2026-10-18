@@ -7,6 +7,14 @@ import java.util.TimeZone
 class RecordingFileNamingTest {
 
     @Test
+    fun `instrumentalNameForTitle keeps dots of the title`() =
+        assertEquals("Mr. Brightside_strumentale", RecordingFileNaming.instrumentalNameForTitle("Mr. Brightside"))
+
+    @Test
+    fun `trimmedName sanitizes and adds suffix`() =
+        assertEquals("A_B_tagliato", RecordingFileNaming.trimmedName("A/B"))
+
+    @Test
     fun `sanitize leaves a normal name untouched`() {
         assertEquals("My Song", RecordingFileNaming.sanitize("My Song"))
     }

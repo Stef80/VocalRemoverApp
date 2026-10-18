@@ -58,6 +58,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.example.vocalremover.playback.PlayerState
 import com.example.vocalremover.ui.R
 import com.stef.vocalremover.ui.overlay.BubbleOverlayService
 import com.stef.vocalremover.ui.overlay.CaptureOverlayStatus
@@ -99,9 +100,18 @@ data class ImportOptions(
 }
 
 @Composable
-fun ImportSongScreen(onBack: () -> Unit = {}) {
+fun ImportSongScreen(
+    state: ImportUiState = ImportUiState.Empty,
+    playerState: PlayerState = PlayerState(),
+    onBack: () -> Unit = {},
+    onEdit: () -> Unit = {},
+    onDiscard: () -> Unit = {},
+    onProcess: () -> Unit = {},
+    onTogglePlayback: () -> Unit = {},
+    onSeek: (Long) -> Unit = {},
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+) {
     var options by rememberSaveable(stateSaver = ImportOptions.Saver) { mutableStateOf(ImportOptions()) }
-    val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val previewMessage = stringResource(R.string.import_preview_not_connected)
@@ -162,7 +172,14 @@ fun ImportSongScreen(onBack: () -> Unit = {}) {
             Spacer(Modifier.height(24.dp))
             SectionTitle(R.string.import_record_section)
             Spacer(Modifier.height(8.dp))
-            CaptureCard(isRecording = isRecording, onStart = startCaptureWidget, onStop = stopCaptureWidget)
+            when (state) {
+                ImportUiState.Empty ->
+                    CaptureCard(isRecording = isRecording, onStart = startCaptureWidget, onStop = stopCaptureWidget)
+                is ImportUiState.CaptureReady ->
+                    PendingCaptureCard(state.name, state.isTrimmed, enabled = true, onEdit = onEdit, onDiscard = onDiscard)
+                is ImportUiState.Processing ->
+                    PendingCaptureCard(state.name, isTrimmed = false, enabled = false, onEdit = onEdit, onDiscard = onDiscard)
+            }
            /* Spacer(Modifier.height(24.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
             Spacer(Modifier.height(16.dp))
@@ -171,7 +188,9 @@ fun ImportSongScreen(onBack: () -> Unit = {}) {
             ProcessingOptions(options = options, onOptionsChange = { options = it })*/
             Spacer(Modifier.height(24.dp))
             Button(
-                onClick = showPreviewMessage,
+                // Senza cattura il selettore file non è ancora collegato: resta il messaggio di anteprima.
+                onClick = if (state is ImportUiState.Empty) showPreviewMessage else onProcess,
+                enabled = state !is ImportUiState.Processing,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -182,6 +201,23 @@ fun ImportSongScreen(onBack: () -> Unit = {}) {
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
+            }
+            when (state) {
+                ImportUiState.Empty -> Unit
+                is ImportUiState.CaptureReady -> {
+                    Spacer(Modifier.height(16.dp))
+                    PreviewPlayerCard(
+                        playerState = playerState,
+                        playableUri = state.playableUri,
+                        fallbackDurationMs = state.durationMs,
+                        onTogglePlayback = onTogglePlayback,
+                        onSeek = onSeek,
+                    )
+                }
+                is ImportUiState.Processing -> {
+                    Spacer(Modifier.height(16.dp))
+                    ProcessingProgressCard(state.phase)
+                }
             }
             Spacer(Modifier.height(16.dp))
         }

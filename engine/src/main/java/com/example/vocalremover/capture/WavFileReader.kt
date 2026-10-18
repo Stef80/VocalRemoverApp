@@ -8,7 +8,14 @@ import java.nio.ByteOrder
 
 object WavFileReader {
 
-    data class WavInfo(val sampleRate: Int, val channelCount: Int)
+    /** [dataOffset]: byte dove iniziano i campioni (l'header è fisso a 44 byte). */
+    data class WavInfo(
+        val sampleRate: Int,
+        val channelCount: Int,
+        val blockAlign: Int,
+        val dataOffset: Long,
+        val frameCount: Long
+    )
 
     class UnsupportedWavFormatException(message: String) : Exception(message)
 
@@ -21,8 +28,17 @@ object WavFileReader {
     fun readInfo(file: File): WavInfo =
         RandomAccessFile(file, "r").use { raf ->
             val header = readHeader(raf, file.length())
-            WavInfo(sampleRate = header.sampleRate, channelCount = header.channelCount)
+            WavInfo(
+                sampleRate = header.sampleRate,
+                channelCount = header.channelCount,
+                blockAlign = header.blockAlign,
+                dataOffset = HEADER_SIZE.toLong(),
+                frameCount = (header.dataSize / header.blockAlign).toLong()
+            )
         }
+
+    /** Durata in ms, troncata. */
+    fun durationMs(info: WavInfo): Long = info.frameCount * 1000 / info.sampleRate
 
     fun readStereoPcm(file: File): StereoPcm =
         RandomAccessFile(file, "r").use { raf ->

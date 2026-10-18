@@ -107,6 +107,14 @@ class LibraryPlayer(context: Context) {
         _state.update { it.copy(positionMs = currentPositionMs()) }
     }
 
+    /** Ferma e scarica il brano: il prossimo play() lo ricarica anche se l'Uri è lo stesso
+     *  (es. file riscritto con lo stesso nome). */
+    fun stop() {
+        checkUsable()
+        player.stop()
+        _state.update { it.copy(isPlaying = false, positionMs = 0) }
+    }
+
     /** Limitata a [0, durata]; finché la durata non è nota si limita solo in basso. */
     fun seekTo(positionMs: Long) {
         checkUsable()
