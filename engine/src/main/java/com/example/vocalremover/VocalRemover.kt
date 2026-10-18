@@ -8,7 +8,10 @@ import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -38,7 +41,8 @@ class VocalRemover(
     companion object {
         private const val TAG = "VocalRemover"
         private const val MODEL_ASSET = "vocal_remover_fp32.onnx"
-        private const val MODEL_CACHE_FILE = "vocal_remover_fp32.onnx"
+        /** Prefisso della copia in cache; il suffisso è la chiave di installazione. */
+        private const val MODEL_CACHE_PREFIX = "vocal_remover_fp32"
         private const val N_FFT = 5120
         private const val HOP_LENGTH = 1024
         private const val DIM_F = 2560
@@ -49,14 +53,26 @@ class VocalRemover(
         /** Lato blocco per trasposizioni cache-friendly: 32×32 float = 4 KB, sta in L1. */
         private const val TRANSPOSE_BLOCK = 32
 
+        /**
+         * Copia atomica: scrive su un file temporaneo e lo rinomina solo a copia completa,
+         * così un processo ucciso a metà non lascia un modello troncato al posto di quello buono.
+         */
         fun copyAssetStreamToFile(input: InputStream, outputFile: File) {
-            outputFile.outputStream().use { output ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    output.write(buffer, 0, read)
+            val tmpFile = File(outputFile.path + ".tmp")
+            try {
+                tmpFile.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                    }
                 }
+                if (!tmpFile.renameTo(outputFile)) {
+                    throw IOException("Impossibile rinominare ${tmpFile.name} in ${outputFile.name}")
+                }
+            } finally {
+                tmpFile.delete()
             }
         }
 
@@ -97,14 +113,42 @@ class VocalRemover(
                     session.outputNames.iterator().next()
                 )
                 loadedRef.set(created)
-                // close() concorrente durante la compilazione: chiude chi arriva per secondo.
-                if (closed) {
-                    loadedRef.getAndSet(null)?.session?.close()
-                    error("VocalRemover chiuso durante la creazione della sessione")
+                // close() concorrente durante la compilazione: chiude chi arriva per secondo,
+                // ma mai sotto una run già partita (altro thread che ha letto loadedRef).
+                synchronized(runLock) {
+                    if (closed) {
+                        if (runsInFlight == 0) loadedRef.getAndSet(null)?.session?.close()
+                        error("VocalRemover chiuso durante la creazione della sessione")
+                    }
                 }
                 created
             }
         }
+
+    /**
+     * Coordina session.run e close(): close() non libera la sessione nativa sotto
+     * un'inferenza in corso (crash nativo), ma la lascia chiudere all'ultima run che termina.
+     * Così close() non blocca il thread UI per la durata di un chunk (secondi su CPU).
+     */
+    private val runLock = Any()
+    private val inferenceMutex = Mutex()
+    private var runsInFlight = 0  // protetto da runLock
+
+    private inline fun <T> withSession(block: (Loaded) -> T): T {
+        val model = loaded
+        synchronized(runLock) {
+            check(!closed && loadedRef.get() === model) { "VocalRemover già chiuso" }
+            runsInFlight++
+        }
+        try {
+            return block(model)
+        } finally {
+            synchronized(runLock) {
+                runsInFlight--
+                if (closed && runsInFlight == 0) loadedRef.getAndSet(null)?.session?.close()
+            }
+        }
+    }
 
     /** Mappa riutilizzata tra chunk per evitare una HashMap per iterazione. */
     private val inputMap = HashMap<String, OnnxTensor>(1)
@@ -152,8 +196,16 @@ class VocalRemover(
         loaded
     }
 
+    private fun installKey(context: Context): Long =
+        context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+
     private fun createSession(context: Context): OrtSession {
-        val modelFile = File(context.cacheDir, MODEL_CACHE_FILE)
+        // Chiave di installazione nel nome: un aggiornamento dell'app che cambia il modello
+        // non riusa la copia vecchia. Le copie (e i .tmp) di installazioni precedenti si cancellano.
+        val cacheDir = context.cacheDir
+        val modelFile = File(cacheDir, "${MODEL_CACHE_PREFIX}_${installKey(context)}.onnx")
+        cacheDir.listFiles { f -> f.name.startsWith(MODEL_CACHE_PREFIX) && f != modelFile }
+            ?.forEach { it.delete() }
         if (!modelFile.exists()) {
             Log.i(TAG, "Copio il modello ONNX in cache: ${modelFile.absolutePath}")
             context.assets.open(MODEL_ASSET).use { input ->
@@ -201,8 +253,7 @@ class VocalRemover(
     private fun createQnnSession(context: Context, modelFile: File, options: OrtSession.SessionOptions): OrtSession {
         val dir = context.filesDir
        // @Suppress("DEPRECATION")
-        val installKey = context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
-        val ctxFile = QnnConfig.contextCacheFile(dir, installKey)
+        val ctxFile = QnnConfig.contextCacheFile(dir, installKey(context))
         QnnConfig.staleContextCaches(dir.list()?.toList().orEmpty(), ctxFile.name)
             .forEach { File(dir, it).delete() }
         if (ctxFile.exists()) {
@@ -219,9 +270,20 @@ class VocalRemover(
         return env.createSession(modelFile.absolutePath, options)
     }
 
+    /**
+     * Una sola elaborazione per istanza: chunker, STFT e mappe dei tensori hanno buffer di lavoro
+     * condivisi. Le chiamate concorrenti (es. import file + cattura) si mettono in coda; l'attesa
+     * è cancellabile. Buffer per chiamata raddoppierebbero la memoria senza guadagno: il modello
+     * satura già la CPU/NPU.
+     */
     suspend fun removeVocals(
         signal: StereoPcm,
         onProgress: (Int) -> Unit = {}
+    ): StereoPcm = inferenceMutex.withLock { removeVocalsLocked(signal, onProgress) }
+
+    private suspend fun removeVocalsLocked(
+        signal: StereoPcm,
+        onProgress: (Int) -> Unit
     ): StereoPcm {
         var start = 0L
         Log.i(TAG, "Rimozione voce iniziata: frames=${signal.size}")
@@ -327,11 +389,12 @@ class VocalRemover(
         workspace.inputBuffer.rewind()
         val t2 = System.nanoTime()   // tensore di input pronto per ONNX
 
-        val model = loaded
-        inputMap[model.inputName] = workspace.inputTensor
-        outputMap[model.outputName] = workspace.outputTensor
-        // Output "pinned": ORT scrive direttamente in workspace.outputBuffer.
-        model.session.run(inputMap, outputMap).use { }
+        withSession { model ->
+            inputMap[model.inputName] = workspace.inputTensor
+            outputMap[model.outputName] = workspace.outputTensor
+            // Output "pinned": ORT scrive direttamente in workspace.outputBuffer.
+            model.session.run(inputMap, outputMap).use { }
+        }
         val tRun = System.nanoTime()
 
         workspace.outputBuffer.rewind()
@@ -462,7 +525,10 @@ class VocalRemover(
     }
 
     fun close() {
-        closed = true
-        loadedRef.getAndSet(null)?.session?.close()
+        synchronized(runLock) {
+            closed = true
+            // Con una run in corso la chiusura è rimandata a withSession.
+            if (runsInFlight == 0) loadedRef.getAndSet(null)?.session?.close()
+        }
     }
 }

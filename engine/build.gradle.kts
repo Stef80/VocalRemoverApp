@@ -45,6 +45,16 @@ android {
         viewBinding = true
         buildConfig = true
     }
+
+    testOptions {
+        unitTests.all { test ->
+            // Robolectric scarica android-all (~200 MB) passando da java.io.tmpdir:
+            // su una /tmp piccola finisce lo spazio, quindi si usa una cartella sotto build/.
+            val tmp = layout.buildDirectory.dir("tmp/unitTest").get().asFile
+            test.doFirst { tmp.mkdirs() }
+            test.systemProperty("java.io.tmpdir", tmp.absolutePath)
+        }
+    }
 }
 
 dependencies {
@@ -77,4 +87,7 @@ dependencies {
 
     // Test unitari JVM (nessun test esisteva finora nel modulo)
     testImplementation("junit:junit:4.13.2")
+    // Solo test: Robolectric per creare Uri sulla JVM, coroutines-test per SongProcessor
+    testImplementation("org.robolectric:robolectric:4.16")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }
