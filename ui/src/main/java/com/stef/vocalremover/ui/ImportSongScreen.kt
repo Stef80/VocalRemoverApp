@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.os.Build
-import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -28,8 +27,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
@@ -103,13 +100,13 @@ data class ImportOptions(
 fun ImportSongScreen(
     state: ImportUiState = ImportUiState.Empty,
     playerState: PlayerState = PlayerState(),
-    onBack: () -> Unit = {},
     onEdit: () -> Unit = {},
     onDiscard: () -> Unit = {},
     onProcess: () -> Unit = {},
     onTogglePlayback: () -> Unit = {},
     onSeek: (Long) -> Unit = {},
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+    bottomBar: @Composable () -> Unit = {},
 ) {
     var options by rememberSaveable(stateSaver = ImportOptions.Saver) { mutableStateOf(ImportOptions()) }
     val scope = rememberCoroutineScope()
@@ -153,20 +150,19 @@ fun ImportSongScreen(
         }
     }
 
-    BackHandler(onBack = onBack)
-
     Scaffold(
         modifier = Modifier.safeDrawingPadding(),
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = bottomBar,
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 8.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
         ) {
-            ImportTopBar(onBack = onBack)
+            ImportTopBar()
             Spacer(Modifier.height(16.dp))
             FilePickerCard(onBrowse = showPreviewMessage)
             Spacer(Modifier.height(24.dp))
@@ -225,35 +221,22 @@ fun ImportSongScreen(
 }
 
 @Composable
-private fun ImportTopBar(onBack: () -> Unit) {
-    val backDescription = stringResource(R.string.control_back_description)
+private fun ImportTopBar() {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        IconButton(onClick = onBack) {
-            Icon(
-                painter = painterResource(R.drawable.ic_arrow_back),
-                contentDescription = backDescription,
-                tint = MaterialTheme.colorScheme.onBackground,
-            )
-        }
-        Row(
-            modifier = Modifier.padding(start = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Image(
-                painter = painterResource(R.drawable.logo_corallo_blu),
-                contentDescription = null,
-                modifier = Modifier.size(40.dp),
-            )
-            Text(
-                text = stringResource(R.string.import_title),
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-        }
+        Image(
+            painter = painterResource(R.drawable.logo_corallo_blu),
+            contentDescription = null,
+            modifier = Modifier.size(56.dp),
+        )
+        Text(
+            text = stringResource(R.string.import_title),
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
     }
 }
 

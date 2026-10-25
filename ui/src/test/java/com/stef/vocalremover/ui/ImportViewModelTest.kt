@@ -193,7 +193,19 @@ class ImportViewModelTest {
     }
 
     @Test
-    fun `successful processing returns to Empty and completes capture`() = runTest(dispatcher) {
+    fun `pausePreview mette in pausa l'anteprima`() = runTest(dispatcher) {
+        captures.capture = pending
+        val vm = viewModel()
+        vm.togglePlayback()
+        player.calls.clear()
+
+        vm.pausePreview()
+
+        assertEquals(listOf("pause"), player.calls)
+    }
+
+    @Test
+    fun `successful processing returns to Empty and completes capture`()= runTest(dispatcher) {
         captures.capture = pending
         val vm = viewModel()
         val states = mutableListOf<ImportUiState>()

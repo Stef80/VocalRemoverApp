@@ -4,19 +4,21 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.annotation.StringRes
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
-import com.example.vocalremover.MainActivity as LegacyMainActivity
 import com.example.vocalremover.processing.ProcessingError
 import com.example.vocalremover.ui.R
 import com.stef.vocalremover.ui.editor.TrimEditorScreen
@@ -25,11 +27,11 @@ import com.stef.vocalremover.ui.player.PlayerViewModel
 import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 import kotlinx.coroutines.delay
 
-/** Punto di accesso dell'app. La schermata XML precedente resta raggiungibile finché non viene migrata. */
+/** Punto di accesso dell'app: splash, poi le schede Libreria / Cattura / Player del footer. */
 class MainActivity : ComponentActivity() {
 
     /**
-     * Trigger di navigazione verso `ImportSongScreen`, aggiornabile sia da `onCreate`
+     * Trigger per passare alla scheda Cattura, aggiornabile sia da `onCreate`
      * (avvio "a freddo", es. quando il bubble riapre l'app con un nuovo task dopo lo
      * stop della registrazione) sia da `onNewIntent` (istanza già viva, riusata grazie
      * a `FLAG_ACTIVITY_SINGLE_TOP`). Separato dagli state `rememberSaveable` della UI
@@ -46,7 +48,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (intent.consumeOpenImportScreenExtra()) {
+        // Dopo la morte del processo il sistema riconsegna l'Intent originale (l'extra rimosso non
+        // viene salvato): senza questo controllo la ricreazione riaprirebbe Cattura e l'editor.
+        if (savedInstanceState == null && intent.consumeOpenImportScreenExtra()) {
             openImportScreenRequest = true
             importViewModel.loadPendingCapture(openEditor = true)
         }
@@ -58,13 +62,34 @@ class MainActivity : ComponentActivity() {
         setContent {
             VocalRemoverTheme {
                 var showIntroduction by rememberSaveable { mutableStateOf(true) }
-                var showImportScreen by rememberSaveable { mutableStateOf(false) }
-                var showPlayer by rememberSaveable { mutableStateOf(false) }
+                var tab by rememberSaveable { mutableStateOf(AppTab.Library) }
                 val player by playerViewModel.state.collectAsState()
                 val importState by importViewModel.importState.collectAsState()
                 val editorState by importViewModel.editorState.collectAsState()
                 val playerState by importViewModel.playerState.collectAsState()
                 val snackbarHostState = remember { SnackbarHostState() }
+                val current = AppNavigation.resolve(tab, hasTrack = player != null)
+                // Scheda letta al momento della chiamata, non `current`: BackHandler (activity 1.13)
+                // ed effetti possono invocare una closure di una composizione precedente.
+                fun liveTab() = AppNavigation.resolve(tab, hasTrack = playerViewModel.state.value != null)
+                // Unico punto di cambio scheda: la riproduzione della scheda lasciata va in pausa.
+                fun selectTab(new: AppTab) {
+                    val from = liveTab()
+                    if (new == from) return
+                    when (from) {
+                        AppTab.Player -> playerViewModel.leave()
+                        AppTab.Capture -> importViewModel.pausePreview()
+                        AppTab.Library -> Unit
+                    }
+                    tab = new
+                }
+                val playerEnabled = player != null
+                // Stabile tra un tick di posizione e l'altro del player, che ricompone questa root.
+                val bottomBar: @Composable () -> Unit = remember(current, playerEnabled) {
+                    { AppBottomBar(selected = current, playerEnabled = playerEnabled, onSelect = ::selectTab) }
+                }
+                // Ogni scheda conserva il proprio stato salvabile (scroll, finestre) quando si cambia scheda.
+                val tabStateHolder = rememberSaveableStateHolder()
                 LaunchedEffect(Unit) {
                     importViewModel.events.collect { event ->
                         snackbarHostState.currentSnackbarData?.dismiss()
@@ -80,11 +105,14 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(openImportScreenRequest) {
                     if (openImportScreenRequest) {
                         showIntroduction = false
-                        showImportScreen = true
+                        selectTab(AppTab.Capture)
                         openImportScreenRequest = false
                     }
                 }
                 val editor = editorState
+                BackHandler(enabled = !showIntroduction && editor == null && AppNavigation.back(current) != null) {
+                    AppNavigation.back(liveTab())?.let(::selectTab)
+                }
                 if (showIntroduction) {
                     SplashScreen()
                 } else if (editor != null) {
@@ -99,52 +127,38 @@ class MainActivity : ComponentActivity() {
                         onClose = importViewModel::closeEditor,
                         snackbarHostState = snackbarHostState,
                     )
-                } else if (showImportScreen) {
-                    ImportSongScreen(
-                        state = importState,
-                        playerState = playerState,
-                        onBack = { showImportScreen = false },
-                        onEdit = importViewModel::openEditor,
-                        onDiscard = importViewModel::discard,
-                        onProcess = importViewModel::process,
-                        onTogglePlayback = importViewModel::togglePlayback,
-                        onSeek = importViewModel::onSeek,
-                        snackbarHostState = snackbarHostState,
-                    )
-                } else if (showPlayer && player != null) {
-                    PlayerScreen(
-                        state = player,
-                        onNavigateBack = {
-                            playerViewModel.leave()
-                            showPlayer = false
-                        },
-                        onRewind = playerViewModel::rewind,
-                        onPlay = playerViewModel::play,
-                        onPause = playerViewModel::pause,
-                        onForward = playerViewModel::forward,
-                        onSeek = playerViewModel::seekTo,
-                        onOpenImportScreen = {
-                            playerViewModel.leave()
-                            showImportScreen = true
-                        },
-                        onOpenLegacyScreen = {
-                            playerViewModel.leave()
-                            startActivity(Intent(this, LegacyMainActivity::class.java))
-                        },
-                    )
-                } else {
-                    LibraryRoute(
-                        onTrackClick = { track ->
-                            playerViewModel.open(track)
-                            showPlayer = true
-                        },
-                        onTrackRenamed = playerViewModel::onTrackRenamed,
-                        onTrackDeleted = playerViewModel::onTrackDeleted,
-                        onOpenImportScreen = { showImportScreen = true },
-                        onOpenLegacyScreen = {
-                            startActivity(Intent(this, LegacyMainActivity::class.java))
-                        },
-                    )
+                } else tabStateHolder.SaveableStateProvider(current.name) {
+                    when (current) {
+                        AppTab.Library -> LibraryRoute(
+                            onTrackClick = { track ->
+                                playerViewModel.open(track)
+                                selectTab(AppTab.Player)
+                            },
+                            onTrackRenamed = playerViewModel::onTrackRenamed,
+                            onTrackDeleted = playerViewModel::onTrackDeleted,
+                            bottomBar = bottomBar,
+                        )
+                        AppTab.Capture -> ImportSongScreen(
+                            state = importState,
+                            playerState = playerState,
+                            onEdit = importViewModel::openEditor,
+                            onDiscard = importViewModel::discard,
+                            onProcess = importViewModel::process,
+                            onTogglePlayback = importViewModel::togglePlayback,
+                            onSeek = importViewModel::onSeek,
+                            snackbarHostState = snackbarHostState,
+                            bottomBar = bottomBar,
+                        )
+                        AppTab.Player -> PlayerScreen(
+                            state = player,
+                            onRewind = playerViewModel::rewind,
+                            onPlay = playerViewModel::play,
+                            onPause = playerViewModel::pause,
+                            onForward = playerViewModel::forward,
+                            onSeek = playerViewModel::seekTo,
+                            bottomBar = bottomBar,
+                        )
+                    }
                 }
             }
         }
@@ -182,7 +196,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         /** Impostato da `BubbleOverlayService` quando la registrazione termina, per
-         * riportare in primo piano `ImportSongScreen` indipendentemente da dove si
+         * riportare in primo piano la scheda Cattura indipendentemente da dove si
          * trovasse l'utente prima di avviare la cattura (o dallo stato di default
          * dell'app se l'istanza dell'Activity era nel frattempo terminata). */
         const val EXTRA_OPEN_IMPORT_SCREEN = "open_import_screen"

@@ -22,7 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -69,8 +68,7 @@ fun LibraryRoute(
     onTrackClick: (LibraryTrack) -> Unit,
     onTrackRenamed: (Uri, String) -> Unit,
     onTrackDeleted: (Uri) -> Unit,
-    onOpenImportScreen: () -> Unit,
-    onOpenLegacyScreen: () -> Unit,
+    bottomBar: @Composable () -> Unit = {},
     viewModel: LibraryViewModel = viewModel(factory = LibraryViewModel.Factory),
 ) {
     val state by viewModel.state.collectAsState()
@@ -96,7 +94,8 @@ fun LibraryRoute(
         }
     }
     LifecycleResumeEffect(viewModel) {
-        // Al ritorno dalle impostazioni il permesso può essere cambiato.
+        // Al ritorno dalle impostazioni il permesso può essere cambiato. Scatta anche a ogni ritorno
+        // sulla scheda Libreria dal footer: voluto, così compaiono subito i brani appena elaborati.
         permission.recheck()
         viewModel.refresh()
         onPauseOrDispose { }
@@ -108,9 +107,8 @@ fun LibraryRoute(
         onTrackClick = onTrackClick,
         onRename = viewModel::rename,
         onDelete = viewModel::delete,
-        onOpenImportScreen = onOpenImportScreen,
-        onOpenLegacyScreen = onOpenLegacyScreen,
         snackbarHostState = snackbarHostState,
+        bottomBar = bottomBar,
     )
 }
 
@@ -122,9 +120,8 @@ fun LibraryScreen(
     onTrackClick: (LibraryTrack) -> Unit = {},
     onRename: (LibraryTrack, String) -> Unit = { _, _ -> },
     onDelete: (LibraryTrack) -> Unit = {},
-    onOpenImportScreen: () -> Unit = {},
-    onOpenLegacyScreen: () -> Unit = {},
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+    bottomBar: @Composable () -> Unit = {},
 ) {
     val tracks = (state as? LibraryUiState.Tracks)?.tracks.orEmpty()
     // Per Uri, così le finestre sopravvivono alla rotazione e si chiudono se il brano sparisce.
@@ -136,6 +133,7 @@ fun LibraryScreen(
     Scaffold(
         modifier = Modifier.safeDrawingPadding(),
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = bottomBar,
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -188,19 +186,6 @@ fun LibraryScreen(
                         contentPadding = PaddingValues(vertical = 4.dp),
                     )
                 }
-            }
-            Spacer(Modifier.height(12.dp))
-            Button(
-                onClick = onOpenImportScreen,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.player_import_song))
-            }
-            TextButton(
-                onClick = onOpenLegacyScreen,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            ) {
-                Text(stringResource(R.string.player_open_legacy_screen))
             }
         }
     }

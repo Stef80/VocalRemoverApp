@@ -8,8 +8,6 @@
     <string name="player_now_playing">In riproduzione</string>
     <string name="player_track_placeholder">Titolo canzone - Artista</string>
     <string name="player_sample_lyrics">Testo della canzone di esempio…</string>
-    <string name="player_open_legacy_screen">Apri schermata attuale</string>
-    <string name="player_import_song">Importa canzone</string>
     <string name="library_title">Libreria</string>
     <string name="library_empty">Nessuna canzone elaborata. Importane una per iniziare.</string>
     <string name="library_error">Impossibile leggere la libreria.</string>
@@ -122,4 +120,9 @@
     <string name="import_event_inference_failed">Errore durante la rimozione della voce</string>
     <string name="import_event_save_failed">Impossibile salvare il brano</string>
     <string name="import_event_preview_unavailable">Anteprima non disponibile</string>
+
+    <!-- Footer di navigazione -->
+    <string name="tab_library">Libreria</string>
+    <string name="tab_capture">Cattura</string>
+    <string name="tab_player">Player</string>
 </resources>

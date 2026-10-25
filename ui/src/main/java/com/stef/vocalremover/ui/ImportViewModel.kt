@@ -89,6 +89,9 @@ class ImportViewModel(
         _editorState.value = null
     }
 
+    /** Uscendo dalla scheda Cattura dal footer. */
+    fun pausePreview() = player.pause()
+
     fun onNameChange(name: String) {
         _editorState.update { it?.copy(name = name) }
     }

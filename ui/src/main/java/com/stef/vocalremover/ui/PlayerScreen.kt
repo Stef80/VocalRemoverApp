@@ -1,6 +1,5 @@
 package com.stef.vocalremover.ui
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,16 +14,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,60 +46,59 @@ import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 @Composable
 fun PlayerScreen(
     state: PlayerUiState? = null,
-    onNavigateBack: () -> Unit = {},
     onRewind: () -> Unit = {},
     onPlay: () -> Unit = {},
     onPause: () -> Unit = {},
     onForward: () -> Unit = {},
     onSeek: (Long) -> Unit = {},
-    onOpenImportScreen: () -> Unit = {},
-    onOpenLegacyScreen: () -> Unit = {},
+    bottomBar: @Composable () -> Unit = {},
 ) {
-    val navigateBackDescription = stringResource(R.string.control_back_description)
     val rewindDescription = stringResource(R.string.control_rewind_description)
     val playDescription = stringResource(R.string.control_play_description)
     val pauseDescription = stringResource(R.string.control_pause_description)
     val forwardDescription = stringResource(R.string.control_forward_description)
 
-    BackHandler(onBack = onNavigateBack)
     Scaffold(
         modifier = Modifier.safeDrawingPadding(),
         bottomBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                FloatingActionButton(
-                    onClick = onRewind,
+            Column {
+                Row(
                     modifier = Modifier
-                        .semantics { contentDescription = rewindDescription }
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("<<")
+                    FloatingActionButton(
+                        onClick = onRewind,
+                        modifier = Modifier
+                            .semantics { contentDescription = rewindDescription }
+                    ) {
+                        Text("<<")
+                    }
+                    FloatingActionButton(
+                        onClick = onPlay,
+                        modifier = Modifier
+                            .semantics { contentDescription = playDescription }
+                    ) {
+                        Text(">")
+                    }
+                    FloatingActionButton(
+                        onClick = onPause,
+                        modifier = Modifier
+                            .semantics { contentDescription = pauseDescription }
+                    ) {
+                        Text("||")
+                    }
+                    FloatingActionButton(
+                        onClick = onForward,
+                        modifier = Modifier
+                            .semantics { contentDescription = forwardDescription }
+                    ) {
+                        Text(">>")
+                    }
                 }
-                FloatingActionButton(
-                    onClick = onPlay,
-                    modifier = Modifier
-                        .semantics { contentDescription = playDescription }
-                ) {
-                    Text(">")
-                }
-                FloatingActionButton(
-                    onClick = onPause,
-                    modifier = Modifier
-                        .semantics { contentDescription = pauseDescription }
-                ) {
-                    Text("||")
-                }
-                FloatingActionButton(
-                    onClick = onForward,
-                    modifier = Modifier
-                        .semantics { contentDescription = forwardDescription }
-                ) {
-                    Text(">>")
-                }
+                bottomBar()
             }
         }
     ) { innerPadding ->
@@ -120,15 +114,8 @@ fun PlayerScreen(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ){
-                IconButton(onClick = onNavigateBack) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_arrow_back),
-                        contentDescription = navigateBackDescription,
-                        tint = MaterialTheme.colorScheme.onBackground,
-                    )
-                }
                 Image(
-                    painter = androidx.compose.ui.res.painterResource(R.drawable.logo_corallo_blu),
+                    painter = painterResource(R.drawable.logo_corallo_blu),
                     contentDescription = null,
                     modifier = Modifier
                         .size(56.dp)
@@ -167,19 +154,6 @@ fun PlayerScreen(
             }
             Spacer(Modifier.height(12.dp))
             PlaybackProgress(state = state, onSeek = onSeek)
-            Spacer(Modifier.height(12.dp))
-            Button(
-                onClick = onOpenImportScreen,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.player_import_song))
-            }
-            TextButton(
-                onClick = onOpenLegacyScreen,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            ) {
-                Text(stringResource(R.string.player_open_legacy_screen))
-            }
         }
     }
 }
