@@ -4,7 +4,10 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -103,6 +106,7 @@ fun ImportSongScreen(
     onEdit: () -> Unit = {},
     onDiscard: () -> Unit = {},
     onProcess: () -> Unit = {},
+    onPickFile: (Uri) -> Unit = {},
     onTogglePlayback: () -> Unit = {},
     onSeek: (Long) -> Unit = {},
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
@@ -111,15 +115,13 @@ fun ImportSongScreen(
     var options by rememberSaveable(stateSaver = ImportOptions.Saver) { mutableStateOf(ImportOptions()) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val previewMessage = stringResource(R.string.import_preview_not_connected)
     val overlayPermissionMessage = stringResource(R.string.import_overlay_permission_required)
     val captureRequiresAndroid10Message = stringResource(R.string.import_capture_requires_android_10)
-    val showPreviewMessage: () -> Unit = {
-        scope.launch {
-            snackbarHostState.currentSnackbarData?.dismiss()
-            snackbarHostState.showSnackbar(previewMessage)
-        }
+    // Selettore di sistema come nel caricamento da file di `:engine`: nessun permesso storage richiesto.
+    val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let(onPickFile)
     }
+    val isProcessing = state is ImportUiState.Processing
     val startCaptureWidget: () -> Unit = {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             scope.launch {
@@ -164,17 +166,25 @@ fun ImportSongScreen(
         ) {
             ImportTopBar()
             Spacer(Modifier.height(16.dp))
-            FilePickerCard(onBrowse = showPreviewMessage)
+            FilePickerCard(
+                processingName = (state as? ImportUiState.Processing)?.takeIf { it.fromFile }?.name,
+                enabled = !isProcessing,
+                onBrowse = { pickAudio.launch(AUDIO_MIME_TYPE) },
+            )
             Spacer(Modifier.height(24.dp))
             SectionTitle(R.string.import_record_section)
             Spacer(Modifier.height(8.dp))
             when (state) {
                 ImportUiState.Empty ->
-                    CaptureCard(isRecording = isRecording, onStart = startCaptureWidget, onStop = stopCaptureWidget)
+                    CaptureCard(isRecording, enabled = true, onStart = startCaptureWidget, onStop = stopCaptureWidget)
                 is ImportUiState.CaptureReady ->
                     PendingCaptureCard(state.name, state.isTrimmed, enabled = true, onEdit = onEdit, onDiscard = onDiscard)
-                is ImportUiState.Processing ->
+                is ImportUiState.Processing -> if (state.fromFile) {
+                    // Durante l'elaborazione di un file la cattura non si avvia: il processore è occupato.
+                    CaptureCard(isRecording, enabled = false, onStart = startCaptureWidget, onStop = stopCaptureWidget)
+                } else {
                     PendingCaptureCard(state.name, isTrimmed = false, enabled = false, onEdit = onEdit, onDiscard = onDiscard)
+                }
             }
            /* Spacer(Modifier.height(24.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
@@ -184,9 +194,9 @@ fun ImportSongScreen(
             ProcessingOptions(options = options, onOptionsChange = { options = it })*/
             Spacer(Modifier.height(24.dp))
             Button(
-                // Senza cattura il selettore file non è ancora collegato: resta il messaggio di anteprima.
-                onClick = if (state is ImportUiState.Empty) showPreviewMessage else onProcess,
-                enabled = state !is ImportUiState.Processing,
+                // Elabora la cattura in attesa; un file scelto dalla memoria parte da solo.
+                onClick = onProcess,
+                enabled = state is ImportUiState.CaptureReady,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -250,7 +260,7 @@ private fun SectionTitle(@StringRes textRes: Int) {
 }
 
 @Composable
-private fun FilePickerCard(onBrowse: () -> Unit) {
+private fun FilePickerCard(processingName: String?, enabled: Boolean, onBrowse: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -268,7 +278,15 @@ private fun FilePickerCard(onBrowse: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
             )
-            OutlinedButton(onClick = onBrowse) {
+            if (!processingName.isNullOrBlank()) {
+                Text(
+                    text = processingName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            OutlinedButton(onClick = onBrowse, enabled = enabled) {
                 Text(stringResource(R.string.import_browse_storage))
             }
             Text(
@@ -282,7 +300,7 @@ private fun FilePickerCard(onBrowse: () -> Unit) {
 }
 
 @Composable
-private fun CaptureCard(isRecording: Boolean, onStart: () -> Unit, onStop: () -> Unit) {
+private fun CaptureCard(isRecording: Boolean, enabled: Boolean, onStart: () -> Unit, onStop: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -312,6 +330,7 @@ private fun CaptureCard(isRecording: Boolean, onStart: () -> Unit, onStop: () ->
             }
             Button(
                 onClick = if (isRecording) onStop else onStart,
+                enabled = enabled,
                 colors = if (isRecording) {
                     ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 } else {
@@ -408,6 +427,8 @@ private fun ImportSongScreenPreview() {
         ImportSongScreen()
     }
 }
+
+private const val AUDIO_MIME_TYPE = "audio/*"
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this

@@ -1,6 +1,8 @@
 package com.stef.vocalremover.ui
 
+import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -36,14 +38,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Cattura in attesa → editor di taglio → elaborazione. Legato a `MainActivity`, condiviso da
- * `ImportSongScreen` e `TrimEditorScreen`: l'elaborazione continua anche cambiando schermata.
+ * Cattura in attesa → editor di taglio → elaborazione, oppure file scelto dalla memoria →
+ * elaborazione immediata. Legato a `MainActivity`, condiviso da `ImportSongScreen` e
+ * `TrimEditorScreen`: l'elaborazione continua anche cambiando schermata.
  */
 class ImportViewModel(
     private val captures: PendingCaptureRepository,
     private val processor: SongProcessor,
     private val player: PreviewPlayer,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** Nome del file scelto (`OpenableColumns.DISPLAY_NAME`); null se non disponibile. */
+    private val displayNameOf: (Uri) -> String? = { null },
     private val releaseResources: () -> Unit = {},
 ) : ViewModel() {
 
@@ -206,32 +211,79 @@ class ImportViewModel(
         }
     }
 
-    private suspend fun runProcessing(current: PendingCapture) = coroutineScope {
+    private suspend fun runProcessing(current: PendingCapture) {
         val name = current.displayName
-        _importState.value = ImportUiState.Processing(name, ProcessingPhase.Decoding)
-        val progress = launch {
-            processor.state.collect { state ->
-                phaseOf(state)?.let { _importState.value = ImportUiState.Processing(name, it) }
-            }
-        }
+        val savedUri = processWithProgress(
+            Uri.fromFile(current.playableFile),
+            name,
+            RecordingFileNaming.instrumentalNameForTitle(name),
+            fromFile = false,
+        )
         try {
-            val savedUri = processor.process(
-                Uri.fromFile(current.playableFile),
-                RecordingFileNaming.instrumentalNameForTitle(name),
-            )
-            try {
-                withContext(ioDispatcher) { captures.completeProcessing(savedUri) }
-            } catch (e: Exception) {
-                // Lo strumentale è salvato: si segnala comunque la riuscita, lo stato si rilegge.
-                Log.e(TAG, "Pulizia della cattura dopo l'elaborazione fallita", e)
-            }
-        } finally {
-            progress.cancel()
+            withContext(ioDispatcher) { captures.completeProcessing(savedUri) }
+        } catch (e: Exception) {
+            // Lo strumentale è salvato: si segnala comunque la riuscita, lo stato si rilegge.
+            Log.e(TAG, "Pulizia della cattura dopo l'elaborazione fallita", e)
         }
         capture = null
         _importState.value = ImportUiState.Empty
         load(openEditor = false)
         _events.send(ImportEvent.ProcessingDone)
+    }
+
+    /**
+     * File scelto con «Sfoglia memoria»: si elabora subito e lo strumentale finisce in libreria,
+     * come nel caricamento da file di `:engine`. L'eventuale cattura in attesa resta intatta.
+     */
+    fun processFile(source: Uri) {
+        if (processingJob?.isActive == true) return
+        if (_importState.value is ImportUiState.Processing) return
+        player.pause()
+        processingJob = viewModelScope.launch {
+            val fileName = withContext(ioDispatcher) {
+                try {
+                    displayNameOf(source)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Nome del file non disponibile: $source", e)
+                    null
+                }
+            }
+            try {
+                processWithProgress(
+                    source,
+                    fileName.orEmpty(),
+                    RecordingFileNaming.instrumentalName(fileName),
+                    fromFile = true,
+                )
+                _events.send(ImportEvent.ProcessingDone)
+            } catch (e: ProcessingException) {
+                _events.send(ImportEvent.ProcessingFailed(e.error, fromFile = true))
+            } finally {
+                // load() ignora lo stato Processing: lo si azzera prima di rileggere la cattura.
+                if (_importState.value is ImportUiState.Processing) _importState.value = ImportUiState.Empty
+            }
+            load(openEditor = false)
+        }
+    }
+
+    /** Lancia [SongProcessor.process] riportandone le fasi in [ImportUiState.Processing]. */
+    private suspend fun processWithProgress(
+        source: Uri,
+        name: String,
+        outputName: String,
+        fromFile: Boolean,
+    ): Uri = coroutineScope {
+        _importState.value = ImportUiState.Processing(name, ProcessingPhase.Decoding, fromFile)
+        val progress = launch {
+            processor.state.collect { state ->
+                phaseOf(state)?.let { _importState.value = ImportUiState.Processing(name, it, fromFile) }
+            }
+        }
+        try {
+            processor.process(source, outputName)
+        } finally {
+            progress.cancel()
+        }
     }
 
     fun discard() {
@@ -340,6 +392,10 @@ class ImportViewModel(
         private const val TAG = "ImportViewModel"
         private const val WAVEFORM_BUCKETS = 1000
 
+        private fun queryDisplayName(context: Context, uri: Uri): String? =
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = checkNotNull(this[APPLICATION_KEY])
@@ -348,6 +404,7 @@ class ImportViewModel(
                     captures = PendingCaptureRepository.create(app),
                     processor = SongProcessor.create(app, remover),
                     player = LibraryPreviewPlayer(LibraryPlayer(app)),
+                    displayNameOf = { uri -> queryDisplayName(app, uri) },
                     releaseResources = remover::close,
                 )
             }

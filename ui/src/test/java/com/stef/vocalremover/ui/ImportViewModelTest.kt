@@ -4,6 +4,7 @@ import android.net.Uri
 import com.example.vocalremover.StereoPcm
 import com.example.vocalremover.capture.PendingCapture
 import com.example.vocalremover.capture.PendingCaptureRepository
+import com.example.vocalremover.capture.RecordingFileNaming
 import com.example.vocalremover.playback.PlayerState
 import com.example.vocalremover.processing.InstrumentalExtractor
 import com.example.vocalremover.processing.InstrumentalSaver
@@ -55,6 +56,8 @@ class ImportViewModelTest {
     private var extractorGate: CompletableDeferred<Unit>? = null
     private var extractorCalls = 0
     private var savedInstrumentalName: String? = null
+    private var pickedFileName: String? = "Canzone.mp3"
+    private val pickedFile: Uri = Uri.parse("content://downloads/document/42")
 
     private val pending = PendingCapture(
         id = "c1",
@@ -86,7 +89,74 @@ class ImportViewModelTest {
             ioDispatcher = dispatcher,
             computeDispatcher = dispatcher,
         )
-        return ImportViewModel(captures, processor, player, ioDispatcher = io)
+        return ImportViewModel(captures, processor, player, ioDispatcher = io, displayNameOf = { pickedFileName })
+    }
+
+    @Test
+    fun `picked file is processed and saved with the instrumental name`() = runTest(dispatcher) {
+        val vm = viewModel()
+        val events = recordEvents(vm)
+
+        vm.processFile(pickedFile)
+
+        assertEquals("Canzone_strumentale", savedInstrumentalName)
+        assertEquals(ImportUiState.Empty, vm.importState.value)
+        assertEquals(listOf<ImportEvent>(ImportEvent.ProcessingDone), events)
+    }
+
+    @Test
+    fun `picked file without name uses the fallback name`() = runTest(dispatcher) {
+        pickedFileName = null
+        val vm = viewModel()
+
+        vm.processFile(pickedFile)
+
+        assertEquals(RecordingFileNaming.instrumentalName(null), savedInstrumentalName)
+    }
+
+    @Test
+    fun `picked file shows Processing fromFile and blocks other processing`() = runTest(dispatcher) {
+        captures.capture = pending
+        extractorGate = CompletableDeferred()
+        val vm = viewModel()
+
+        vm.processFile(pickedFile)
+        val state = vm.importState.value as ImportUiState.Processing
+        vm.process()
+        vm.processFile(pickedFile)
+
+        assertTrue(state.fromFile)
+        assertEquals("Canzone.mp3", state.name)
+        assertEquals(1, extractorCalls)
+        assertEquals(0, captures.beginCalls)
+        extractorGate!!.complete(Unit)
+    }
+
+    @Test
+    fun `picked file leaves the pending capture untouched`() = runTest(dispatcher) {
+        captures.capture = pending
+        val vm = viewModel()
+
+        vm.processFile(pickedFile)
+
+        assertEquals(ImportUiState.CaptureReady("Registrazione", Uri.fromFile(raw), 5000, false), vm.importState.value)
+        assertNull(captures.completed)
+        assertEquals(0, captures.beginCalls)
+    }
+
+    @Test
+    fun `picked file failure emits ProcessingFailed fromFile`() = runTest(dispatcher) {
+        extractorFails = true
+        val vm = viewModel()
+        val events = recordEvents(vm)
+
+        vm.processFile(pickedFile)
+
+        assertEquals(ImportUiState.Empty, vm.importState.value)
+        assertEquals(
+            listOf<ImportEvent>(ImportEvent.ProcessingFailed(ProcessingError.INFERENCE_FAILED, fromFile = true)),
+            events,
+        )
     }
 
     private fun TestScope.recordEvents(vm: ImportViewModel): List<ImportEvent> {

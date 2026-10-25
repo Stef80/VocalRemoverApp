@@ -49,7 +49,6 @@
     <string name="import_option_normalize">Normalizza volume</string>
     <string name="import_option_reverb">Aggiungi leggero riverbero</string>
     <string name="import_process_now">✨  Elabora ora</string>
-    <string name="import_preview_not_connected">Anteprima: funzione non ancora collegata</string>
 
     <string name="control_back_description">Indietro</string>
     <string name="control_play_description">Riproduci</string>
@@ -117,6 +116,7 @@
     <string name="import_event_capture_unavailable">Registrazione non disponibile</string>
     <string name="import_event_processing_done">Salvato in libreria</string>
     <string name="import_event_decode_failed">Impossibile leggere la registrazione</string>
+    <string name="import_event_file_decode_failed">Impossibile leggere il file audio</string>
     <string name="import_event_inference_failed">Errore durante la rimozione della voce</string>
     <string name="import_event_save_failed">Impossibile salvare il brano</string>
     <string name="import_event_preview_unavailable">Anteprima non disponibile</string>

@@ -144,6 +144,7 @@ class MainActivity : ComponentActivity() {
                             onEdit = importViewModel::openEditor,
                             onDiscard = importViewModel::discard,
                             onProcess = importViewModel::process,
+                            onPickFile = importViewModel::processFile,
                             onTogglePlayback = importViewModel::togglePlayback,
                             onSeek = importViewModel::onSeek,
                             snackbarHostState = snackbarHostState,
@@ -188,7 +189,8 @@ class MainActivity : ComponentActivity() {
         ImportEvent.ProcessingDone -> R.string.import_event_processing_done
         ImportEvent.PreviewUnavailable -> R.string.import_event_preview_unavailable
         is ImportEvent.ProcessingFailed -> when (error) {
-            ProcessingError.DECODE_FAILED -> R.string.import_event_decode_failed
+            ProcessingError.DECODE_FAILED ->
+                if (fromFile) R.string.import_event_file_decode_failed else R.string.import_event_decode_failed
             ProcessingError.INFERENCE_FAILED -> R.string.import_event_inference_failed
             ProcessingError.SAVE_FAILED -> R.string.import_event_save_failed
         }
