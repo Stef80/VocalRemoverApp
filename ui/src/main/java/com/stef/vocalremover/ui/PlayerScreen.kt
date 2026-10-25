@@ -1,5 +1,6 @@
 package com.stef.vocalremover.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,36 +17,56 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import com.example.vocalremover.playback.PlayerError
 import com.example.vocalremover.ui.R
+import com.stef.vocalremover.ui.player.PlayerUiState
 import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 
+/**
+ * Player di un brano della Libreria. `<<` e `>>` spostano di 10 secondi; la freccia e il tasto
+ * indietro di sistema tornano alla Libreria.
+ */
 @Composable
 fun PlayerScreen(
-    onBack: () -> Unit = {},
+    state: PlayerUiState? = null,
+    onNavigateBack: () -> Unit = {},
+    onRewind: () -> Unit = {},
     onPlay: () -> Unit = {},
     onPause: () -> Unit = {},
     onForward: () -> Unit = {},
+    onSeek: (Long) -> Unit = {},
     onOpenImportScreen: () -> Unit = {},
     onOpenLegacyScreen: () -> Unit = {},
 ) {
-    val backDescription = stringResource(R.string.control_back_description)
+    val navigateBackDescription = stringResource(R.string.control_back_description)
+    val rewindDescription = stringResource(R.string.control_rewind_description)
     val playDescription = stringResource(R.string.control_play_description)
     val pauseDescription = stringResource(R.string.control_pause_description)
     val forwardDescription = stringResource(R.string.control_forward_description)
 
+    BackHandler(onBack = onNavigateBack)
     Scaffold(
         modifier = Modifier.safeDrawingPadding(),
         bottomBar = {
@@ -57,9 +78,9 @@ fun PlayerScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 FloatingActionButton(
-                    onClick = onBack,
+                    onClick = onRewind,
                     modifier = Modifier
-                        .semantics { contentDescription = backDescription }
+                        .semantics { contentDescription = rewindDescription }
                 ) {
                     Text("<<")
                 }
@@ -99,6 +120,13 @@ fun PlayerScreen(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ){
+                IconButton(onClick = onNavigateBack) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_arrow_back),
+                        contentDescription = navigateBackDescription,
+                        tint = MaterialTheme.colorScheme.onBackground,
+                    )
+                }
                 Image(
                     painter = androidx.compose.ui.res.painterResource(R.drawable.logo_corallo_blu),
                     contentDescription = null,
@@ -112,9 +140,11 @@ fun PlayerScreen(
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = stringResource(R.string.player_track_placeholder),
+                        text = state?.track?.title ?: stringResource(R.string.player_track_placeholder),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -136,6 +166,8 @@ fun PlayerScreen(
                 )
             }
             Spacer(Modifier.height(12.dp))
+            PlaybackProgress(state = state, onSeek = onSeek)
+            Spacer(Modifier.height(12.dp))
             Button(
                 onClick = onOpenImportScreen,
                 modifier = Modifier.fillMaxWidth()
@@ -148,6 +180,56 @@ fun PlayerScreen(
             ) {
                 Text(stringResource(R.string.player_open_legacy_screen))
             }
+        }
+    }
+}
+
+/** Barra trascinabile: durante il trascinamento mostra la posizione scelta, la applica al rilascio. */
+@Composable
+private fun PlaybackProgress(state: PlayerUiState?, onSeek: (Long) -> Unit) {
+    val durationMs = state?.durationMs ?: 0L
+    var dragPositionMs by remember { mutableStateOf<Long?>(null) }
+    val shownPositionMs = (dragPositionMs ?: state?.positionMs ?: 0L).coerceIn(0L, durationMs.coerceAtLeast(0L))
+    val seekDescription = stringResource(R.string.player_seek_description)
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Slider(
+            value = if (durationMs > 0) shownPositionMs.toFloat() / durationMs else 0f,
+            onValueChange = { fraction -> dragPositionMs = (fraction * durationMs).toLong() },
+            onValueChangeFinished = {
+                dragPositionMs?.let(onSeek)
+                dragPositionMs = null
+            },
+            enabled = durationMs > 0,
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = seekDescription }
+        )
+        Row(modifier = Modifier.fillMaxWidth()) {
+            val error = state?.error
+            if (error != null) {
+                Text(
+                    text = stringResource(
+                        when (error) {
+                            PlayerError.SOURCE_UNAVAILABLE -> R.string.player_error_unavailable
+                            PlayerError.PLAYBACK_FAILED -> R.string.player_error_failed
+                        }
+                    ),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
+            Text(
+                text = stringResource(
+                    R.string.import_player_time,
+                    formatMinutesSeconds(shownPositionMs),
+                    formatMinutesSeconds(durationMs)
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -178,7 +260,15 @@ Parole della canzone riga 3
 @Composable
 private fun PlayerScreenPreview() {
     VocalRemoverTheme {
-        PlayerScreen()
+        PlayerScreen(
+            state = PlayerUiState(
+                track = previewLibraryTracks.first(),
+                isPlaying = true,
+                positionMs = 74_000L,
+                durationMs = 222_000L,
+                error = null,
+            )
+        )
     }
 }
 

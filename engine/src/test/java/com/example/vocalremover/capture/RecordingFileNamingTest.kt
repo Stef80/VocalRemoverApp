@@ -86,4 +86,24 @@ class RecordingFileNamingTest {
         assertEquals("Registrazione_strumentale", RecordingFileNaming.instrumentalName(null))
         assertEquals("Registrazione_strumentale", RecordingFileNaming.instrumentalName(".mp3"))
     }
+
+    @Test
+    fun `titleFromLibraryName strips extension and suffix`() =
+        assertEquals("Mr. Brightside", RecordingFileNaming.titleFromLibraryName("Mr. Brightside_strumentale.wav"))
+
+    @Test
+    fun `titleFromLibraryName ignores extension case`() =
+        assertEquals("demo", RecordingFileNaming.titleFromLibraryName("demo.WAV"))
+
+    @Test
+    fun `titleFromLibraryName removes only one trailing suffix`() =
+        assertEquals("x_strumentale", RecordingFileNaming.titleFromLibraryName("x_strumentale_strumentale.wav"))
+
+    @Test
+    fun `titleFromLibraryName keeps the suffix when nothing else is left`() =
+        assertEquals("_strumentale", RecordingFileNaming.titleFromLibraryName("_strumentale.wav"))
+
+    @Test
+    fun `titleFromLibraryName leaves names without extension untouched`() =
+        assertEquals("Canzone", RecordingFileNaming.titleFromLibraryName("Canzone"))
 }

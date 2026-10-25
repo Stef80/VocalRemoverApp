@@ -10,6 +10,25 @@
     <string name="player_sample_lyrics">Testo della canzone di esempio…</string>
     <string name="player_open_legacy_screen">Apri schermata attuale</string>
     <string name="player_import_song">Importa canzone</string>
+    <string name="library_title">Libreria</string>
+    <string name="library_empty">Nessuna canzone elaborata. Importane una per iniziare.</string>
+    <string name="library_error">Impossibile leggere la libreria.</string>
+    <string name="library_duration_unknown">--:--</string>
+    <string name="library_loading_description">Caricamento della libreria</string>
+    <string name="library_permission_message">Consenti l\'accesso alla musica per vedere anche i brani salvati prima di una reinstallazione.</string>
+    <string name="library_permission_grant">Consenti</string>
+    <string name="library_more_actions">Altre azioni</string>
+    <string name="library_action_rename">Rinomina</string>
+    <string name="library_action_delete">Elimina</string>
+    <string name="library_rename_title">Rinomina brano</string>
+    <string name="library_rename_label">Titolo</string>
+    <string name="library_rename_confirm">Salva</string>
+    <string name="library_delete_title">Eliminare il brano?</string>
+    <string name="library_delete_message">«%1$s» verrà cancellato dal telefono.</string>
+    <string name="library_delete_confirm">Elimina</string>
+    <string name="library_dialog_cancel">Annulla</string>
+    <string name="library_rename_failed">Impossibile rinominare il brano.</string>
+    <string name="library_delete_failed">Impossibile eliminare il brano.</string>
 
     <string name="import_title">Importa canzone</string>
     <string name="import_select_file">Seleziona un file</string>
@@ -37,7 +56,11 @@
     <string name="control_back_description">Indietro</string>
     <string name="control_play_description">Riproduci</string>
     <string name="control_pause_description">Pausa</string>
-    <string name="control_forward_description">Avanti</string>
+    <string name="control_forward_description">Avanti di 10 secondi</string>
+    <string name="control_rewind_description">Indietro di 10 secondi</string>
+    <string name="player_seek_description">Posizione nel brano</string>
+    <string name="player_error_unavailable">Il brano non è più disponibile.</string>
+    <string name="player_error_failed">Impossibile riprodurre il brano.</string>
 
     <string name="bubble_status_idle">Scegli l\'app da registrare</string>
     <string name="bubble_status_app_selected">Pronto a registrare %1$s</string>

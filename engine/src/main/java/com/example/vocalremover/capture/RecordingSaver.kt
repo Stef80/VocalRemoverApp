@@ -12,7 +12,8 @@ import java.nio.ByteOrder
 
 object RecordingSaver {
     private const val TAG = "RecordingSaver"
-    private const val BASE_RELATIVE_PATH = "Music/VocalRemover"
+    /** Cartella dei brani elaborati: la legge anche `MediaStoreLibraryRepository`. */
+    internal const val BASE_RELATIVE_PATH = "Music/VocalRemover"
     private const val RAW_RELATIVE_PATH = "$BASE_RELATIVE_PATH/raw"
 
     fun saveProcessedStereoAsWav(

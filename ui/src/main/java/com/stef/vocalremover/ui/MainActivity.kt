@@ -20,6 +20,8 @@ import com.example.vocalremover.MainActivity as LegacyMainActivity
 import com.example.vocalremover.processing.ProcessingError
 import com.example.vocalremover.ui.R
 import com.stef.vocalremover.ui.editor.TrimEditorScreen
+import com.stef.vocalremover.ui.library.LibraryRoute
+import com.stef.vocalremover.ui.player.PlayerViewModel
 import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 import kotlinx.coroutines.delay
 
@@ -39,6 +41,9 @@ class MainActivity : ComponentActivity() {
     /** Cattura in attesa, editor ed elaborazione: sopravvive alle rotazioni dello schermo. */
     private val importViewModel: ImportViewModel by viewModels { ImportViewModel.Factory }
 
+    /** Brano della Libreria aperto nel player. */
+    private val playerViewModel: PlayerViewModel by viewModels { PlayerViewModel.Factory }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (intent.consumeOpenImportScreenExtra()) {
@@ -54,6 +59,8 @@ class MainActivity : ComponentActivity() {
             VocalRemoverTheme {
                 var showIntroduction by rememberSaveable { mutableStateOf(true) }
                 var showImportScreen by rememberSaveable { mutableStateOf(false) }
+                var showPlayer by rememberSaveable { mutableStateOf(false) }
+                val player by playerViewModel.state.collectAsState()
                 val importState by importViewModel.importState.collectAsState()
                 val editorState by importViewModel.editorState.collectAsState()
                 val playerState by importViewModel.playerState.collectAsState()
@@ -104,8 +111,35 @@ class MainActivity : ComponentActivity() {
                         onSeek = importViewModel::onSeek,
                         snackbarHostState = snackbarHostState,
                     )
-                } else {
+                } else if (showPlayer && player != null) {
                     PlayerScreen(
+                        state = player,
+                        onNavigateBack = {
+                            playerViewModel.leave()
+                            showPlayer = false
+                        },
+                        onRewind = playerViewModel::rewind,
+                        onPlay = playerViewModel::play,
+                        onPause = playerViewModel::pause,
+                        onForward = playerViewModel::forward,
+                        onSeek = playerViewModel::seekTo,
+                        onOpenImportScreen = {
+                            playerViewModel.leave()
+                            showImportScreen = true
+                        },
+                        onOpenLegacyScreen = {
+                            playerViewModel.leave()
+                            startActivity(Intent(this, LegacyMainActivity::class.java))
+                        },
+                    )
+                } else {
+                    LibraryRoute(
+                        onTrackClick = { track ->
+                            playerViewModel.open(track)
+                            showPlayer = true
+                        },
+                        onTrackRenamed = playerViewModel::onTrackRenamed,
+                        onTrackDeleted = playerViewModel::onTrackDeleted,
                         onOpenImportScreen = { showImportScreen = true },
                         onOpenLegacyScreen = {
                             startActivity(Intent(this, LegacyMainActivity::class.java))

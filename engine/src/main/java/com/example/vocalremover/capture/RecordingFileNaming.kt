@@ -7,6 +7,8 @@ import java.util.Locale
 object RecordingFileNaming {
 
     private const val FALLBACK_NAME = "Registrazione"
+    private const val INSTRUMENTAL_SUFFIX = "_strumentale"
+    private const val WAV_EXTENSION = ".wav"
     private val invalidCharacters = setOf('/', '\\', ':', '*', '?', '"', '<', '>', '|')
 
     fun sanitize(input: String): String {
@@ -39,13 +41,26 @@ object RecordingFileNaming {
     fun trimmedName(displayName: String): String = "${sanitize(displayName)}_tagliato"
 
     /** Per un titolo scritto dall'utente: niente estensione da togliere (es. "Mr. Brightside"). */
-    fun instrumentalNameForTitle(title: String): String = "${sanitize(title)}_strumentale"
+    fun instrumentalNameForTitle(title: String): String = "${sanitize(title)}$INSTRUMENTAL_SUFFIX"
+
+    /**
+     * Titolo da mostrare per un WAV della libreria: toglie `.wav` (qualsiasi maiuscola) e un solo
+     * `_strumentale` finale. Non è mai vuoto: se non resta nulla si tiene il nome senza estensione.
+     */
+    fun titleFromLibraryName(displayName: String): String {
+        val withoutExtension = if (displayName.endsWith(WAV_EXTENSION, ignoreCase = true)) {
+            displayName.dropLast(WAV_EXTENSION.length)
+        } else {
+            displayName
+        }
+        return withoutExtension.removeSuffix(INSTRUMENTAL_SUFFIX).ifEmpty { withoutExtension }
+    }
 
     fun instrumentalName(sourceDisplayName: String?): String {
         val baseName = sourceDisplayName.orEmpty().trim().let { name ->
             val dot = name.lastIndexOf('.')
             if (dot >= 0) name.substring(0, dot) else name
         }
-        return "${sanitize(baseName)}_strumentale"
+        return "${sanitize(baseName)}$INSTRUMENTAL_SUFFIX"
     }
 }
