@@ -36,16 +36,19 @@ object RecordingFileNaming {
         return "${FALLBACK_NAME}_${formatter.format(Date(timestampMs))}"
     }
 
+    /** Proposed name for a recognized capture: "Artist - Title" (files sanitize it later). */
+    fun nameFromTrack(info: CapturedTrackInfo): String = "${info.artist.trim()} - ${info.title.trim()}"
+
     fun rawCaptureName(displayName: String): String = "${sanitize(displayName)}_capture"
 
     fun trimmedName(displayName: String): String = "${sanitize(displayName)}_tagliato"
 
-    /** Per un titolo scritto dall'utente: niente estensione da togliere (es. "Mr. Brightside"). */
+    /** For a title typed by the user: no extension to strip (e.g. "Mr. Brightside"). */
     fun instrumentalNameForTitle(title: String): String = "${sanitize(title)}$INSTRUMENTAL_SUFFIX"
 
     /**
-     * Titolo da mostrare per un WAV della libreria: toglie `.wav` (qualsiasi maiuscola) e un solo
-     * `_strumentale` finale. Non è mai vuoto: se non resta nulla si tiene il nome senza estensione.
+     * Title to show for a library WAV: strips `.wav` (any case) and a single trailing
+     * `_strumentale`. Never empty: if nothing is left, the name without extension is kept.
      */
     fun titleFromLibraryName(displayName: String): String {
         val withoutExtension = if (displayName.endsWith(WAV_EXTENSION, ignoreCase = true)) {

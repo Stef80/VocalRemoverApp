@@ -3,10 +3,17 @@ package com.example.vocalremover.capture
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import com.example.vocalremover.lyrics.LYRICS_LOG_TAG
+import com.example.vocalremover.lyrics.LyricsScheduler
+import com.example.vocalremover.lyrics.LyricsStatus
+import com.example.vocalremover.lyrics.TrackLyrics
+import com.example.vocalremover.lyrics.TrackLyricsRepository
+import com.example.vocalremover.lyrics.TrackLyricsStore
+import com.example.vocalremover.lyrics.WorkManagerLyricsScheduler
 import java.io.File
 import java.util.UUID
 
-/** Cattura ferma in attesa di elaborazione, con le modifiche salvate dall'editor. */
+/** Stopped capture waiting for processing, with the edits saved by the editor. */
 data class PendingCapture(
     val id: String,
     val rawFile: File,
@@ -14,32 +21,34 @@ data class PendingCapture(
     val displayName: String,
     val trimStartMs: Long,
     val trimEndMs: Long,
-    /** Della cattura originale. */
+    /** Of the original capture. */
     val durationMs: Long,
+    /** Tracks seen during the capture, relative to the untrimmed file. */
+    val trackTimeline: CaptureTrackTimeline? = null,
 ) {
     val playableFile: File get() = trimmedFile ?: rawFile
 }
 
 /**
- * Facciata usata da `:ui` per la cattura in attesa: unisce [CaptureTerminalResultStore], la bozza
- * dell'editor, il taglio e la cancellazione dei file. Tutti i metodi sono bloccanti (I/O).
+ * Facade used by `:ui` for the pending capture: combines [CaptureTerminalResultStore], the editor
+ * draft, trimming and file deletion. All methods are blocking (I/O).
  */
 interface PendingCaptureRepository {
-    /** Cattura STOPPED in attesa, con la bozza (creata se manca). null se non c'è o se il WAV
-     *  è sparito/illeggibile (in quel caso il risultato e la bozza vengono scartati). */
+    /** Pending STOPPED capture, with its draft (created if missing). null if there is none or if the WAV
+     *  is gone/unreadable (in that case the result and the draft are discarded). */
     fun load(): PendingCapture?
     fun peaks(buckets: Int): FloatArray
-    /** Salva nome e maniglie; taglia dall'originale o rimuove il taglio. */
+    /** Saves name and handles; trims from the original or removes the trim. */
     fun saveEdit(displayName: String, startMs: Long, endMs: Long): PendingCapture
-    /** PENDING → PROCESSING per questo proprietario. false se non acquisibile. */
+    /** PENDING → PROCESSING for this owner. false if it cannot be acquired. */
     fun beginProcessing(): Boolean
-    /** markSaved, cancella WAV originale e tagliato, completeSavedHandoff, svuota la bozza. */
+    /** markSaved, deletes the original and trimmed WAV, completeSavedHandoff, clears the draft. */
     fun completeProcessing(savedUri: Uri)
-    /** Rilascia la cattura dopo un errore; file e bozza restano. */
+    /** Releases the capture after an error; files and draft are kept. */
     fun abortProcessing()
-    /** Cancella WAV originale e tagliato, libera lo store, svuota la bozza. */
+    /** Deletes the original and trimmed WAV, frees the store, clears the draft. */
     fun discard()
-    /** Cancella da cacheDir i system_audio_capture_*.wav e *_tagliato.wav non della cattura corrente. */
+    /** Deletes from cacheDir the system_audio_capture_*.wav and *_tagliato.wav not belonging to the current capture. */
     fun cleanOrphans()
 
     companion object {
@@ -51,6 +60,8 @@ internal class DefaultPendingCaptureRepository(
     context: Context,
     private val cacheDir: File = context.cacheDir,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val lyricsStore: TrackLyricsStore = TrackLyricsRepository.lyricsStore(context),
+    private val lyricsScheduler: LyricsScheduler = WorkManagerLyricsScheduler(context.applicationContext, lyricsStore),
 ) : PendingCaptureRepository {
 
     private companion object {
@@ -62,7 +73,7 @@ internal class DefaultPendingCaptureRepository(
     private val draftStore = CaptureDraftStore(context)
     private val ownerId = UUID.randomUUID().toString()
 
-    /** Id della cattura di cui questa istanza ha il lease nello store. */
+    /** Id of the capture whose lease this instance holds in the store. */
     private var leasedResultId: String? = null
 
     @Synchronized
@@ -70,18 +81,19 @@ internal class DefaultPendingCaptureRepository(
         val result = resultStore.peekStoppedResult() ?: return null
         val raw = File(checkNotNull(result.outputPath))
         if (result.state == CaptureTerminalState.SAVED) {
-            // Elaborazione già salvata ma pulizia interrotta (es. app chiusa): la si completa.
+            // Processing already saved but cleanup interrupted (e.g. app closed): finish it.
+            result.savedOutputUri?.let { scheduleLyrics(result, it) }
             finishSavedHandoff(result.id, raw)
             return null
         }
         val durationMs = try {
             WavFileReader.durationMs(WavFileReader.readInfo(raw))
         } catch (failure: Exception) {
-            Log.w(TAG, "WAV della cattura non leggibile, la scarto: ${raw.path}", failure)
+            Log.w(TAG, "Capture WAV unreadable, discarding it: ${raw.path}", failure)
             discardResult(result.id, raw)
             return null
         }
-        return toPendingCapture(result.id, raw, draftFor(result.id, durationMs), durationMs)
+        return toPendingCapture(result, raw, draftFor(result, durationMs), durationMs)
     }
 
     @Synchronized
@@ -95,7 +107,7 @@ internal class DefaultPendingCaptureRepository(
         val raw = File(checkNotNull(result.outputPath))
         val durationMs = WavFileReader.durationMs(WavFileReader.readInfo(raw))
         require(startMs in 0 until endMs && endMs <= durationMs) { "Intervallo non valido: $startMs..$endMs" }
-        val previous = draftFor(result.id, durationMs)
+        val previous = draftFor(result, durationMs)
 
         val trimmed = if (startMs == 0L && endMs == durationMs) {
             null
@@ -106,9 +118,9 @@ internal class DefaultPendingCaptureRepository(
         }
         val draft = CaptureDraft(result.id, name, trimmed?.path, startMs, endMs)
         draftStore.write(draft)
-        // Il vecchio taglio si cancella solo dopo che il nuovo è scritto e registrato.
+        // The old trim is deleted only after the new one is written and recorded.
         previous.trimmedPath?.takeIf { it != trimmed?.path }?.let { File(it).delete() }
-        return toPendingCapture(result.id, raw, draft, durationMs)
+        return toPendingCapture(result, raw, draft, durationMs)
     }
 
     @Synchronized
@@ -119,13 +131,14 @@ internal class DefaultPendingCaptureRepository(
 
     @Synchronized
     override fun completeProcessing(savedUri: Uri) {
-        val resultId = checkNotNull(leasedResultId) { "Elaborazione non iniziata" }
+        val resultId = checkNotNull(leasedResultId) { "Processing not started" }
         val result = checkNotNull(resultStore.peekStoppedResult()?.takeIf { it.id == resultId }) {
-            "Cattura non più presente: $resultId"
+            "Capture no longer present: $resultId"
         }
         check(resultStore.markSaved(resultId, ownerId, savedUri.toString())) {
-            "Impossibile registrare il salvataggio della cattura $resultId"
+            "Cannot record the save of capture $resultId"
         }
+        scheduleLyrics(result, savedUri.toString())
         finishSavedHandoff(resultId, File(checkNotNull(result.outputPath)))
     }
 
@@ -156,18 +169,49 @@ internal class DefaultPendingCaptureRepository(
         cacheDir.listFiles()
             ?.filter { it.isFile && ORPHAN_PATTERN.matches(it.name) && it.absolutePath !in keep }
             ?.forEach { orphan ->
-                if (!orphan.delete()) Log.w(TAG, "Impossibile cancellare ${orphan.path}")
+                if (!orphan.delete()) Log.w(TAG, "Cannot delete ${orphan.path}")
             }
+    }
+
+    /**
+     * Writes the pending lyrics file and queues the download. Called after markSaved and before
+     * the cleanup, so the recovery branch of [load] repeats it if the app closes midway.
+     * An error here must not fail the save, which has already happened.
+     */
+    private fun scheduleLyrics(result: CaptureTerminalResult, savedUri: String) {
+        val timeline = result.trackTimeline ?: run {
+            Log.i(LYRICS_LOG_TAG, "No track metadata: no lyrics lookup")
+            return
+        }
+        try {
+            // Without a draft (recovery before the editor) the whole file counts.
+            val draft = draftStore.read(result.id)
+            val track = TrackTimelineResolver.resolve(
+                timeline, draft?.trimStartMs ?: 0L, draft?.trimEndMs ?: Long.MAX_VALUE
+            ) ?: return
+            if (!lyricsStore.exists(savedUri)) {
+                lyricsStore.write(TrackLyrics(savedUri, track, LyricsStatus.PENDING))
+            }
+            // The worker does not search again if the lyrics were already downloaded.
+            lyricsScheduler.schedule(savedUri)
+            Log.i(
+                LYRICS_LOG_TAG,
+                "Lyrics lookup queued: ${track.artist} - ${track.title}, duration ${track.trackDurationMs} ms, " +
+                    "position at the start of the file ${track.songOffsetMs} ms"
+            )
+        } catch (failure: Exception) {
+            Log.w(TAG, "Cannot prepare the lyrics download", failure)
+        }
     }
 
     private fun currentRawFile(): File =
         File(checkNotNull(resultStore.peekStoppedResult()?.outputPath) { "Nessuna cattura in attesa" })
 
-    private fun draftFor(captureId: String, durationMs: Long): CaptureDraft {
+    private fun draftFor(result: CaptureTerminalResult, durationMs: Long): CaptureDraft {
+        val captureId = result.id
         val existing = draftStore.read(captureId)
         val draft = when {
-            existing == null ->
-                CaptureDraft(captureId, RecordingFileNaming.defaultName(clock()), null, 0L, durationMs)
+            existing == null -> initialDraft(result, durationMs)
             existing.trimmedPath != null && !File(existing.trimmedPath).exists() ->
                 existing.copy(trimmedPath = null, trimStartMs = 0L, trimEndMs = durationMs)
             else -> return existing
@@ -176,18 +220,41 @@ internal class DefaultPendingCaptureRepository(
         return draft
     }
 
-    private fun toPendingCapture(id: String, raw: File, draft: CaptureDraft, durationMs: Long) =
+    /**
+     * First draft: name from the recognized track and trim proposed from the segments (leading
+     * ad and following video excluded). The original file stays intact and editable.
+     */
+    private fun initialDraft(result: CaptureTerminalResult, durationMs: Long): CaptureDraft {
+        val timeline = result.trackTimeline
+        val (start, end) = TrackTimelineResolver.initialRange(timeline, durationMs)
+        val name = timeline?.let { TrackTimelineResolver.resolve(it, start, end) }
+            ?.let(RecordingFileNaming::nameFromTrack)
+            ?: RecordingFileNaming.defaultName(clock())
+        if (start == 0L && end == durationMs) return CaptureDraft(result.id, name, null, 0L, durationMs)
+        return try {
+            val trimmed = File(cacheDir, "${RecordingFileNaming.trimmedName(name)}.wav")
+            WavTrimmer.trim(File(checkNotNull(result.outputPath)), trimmed, start, end)
+            Log.i(LYRICS_LOG_TAG, "Trim proposed from the segments: $start-$end ms of $durationMs")
+            CaptureDraft(result.id, name, trimmed.path, start, end)
+        } catch (failure: Exception) {
+            Log.w(TAG, "Auto-trim failed, proposing the whole file", failure)
+            CaptureDraft(result.id, name, null, 0L, durationMs)
+        }
+    }
+
+    private fun toPendingCapture(result: CaptureTerminalResult, raw: File, draft: CaptureDraft, durationMs: Long) =
         PendingCapture(
-            id = id,
+            id = result.id,
             rawFile = raw,
             trimmedFile = draft.trimmedPath?.let(::File),
             displayName = draft.displayName,
             trimStartMs = draft.trimStartMs,
             trimEndMs = draft.trimEndMs,
             durationMs = durationMs,
+            trackTimeline = result.trackTimeline,
         )
 
-    /** Lease dello store per [resultId]; true anche se questa istanza lo possiede già. */
+    /** Store lease for [resultId]; true even if this instance already owns it. */
     private fun acquire(resultId: String): Boolean {
         if (leasedResultId == resultId) return true
         val lease = resultStore.acquireStoppedResult(ownerId) ?: return false
@@ -202,7 +269,7 @@ internal class DefaultPendingCaptureRepository(
     private fun discardResult(resultId: String, raw: File) {
         val trimmedPath = draftStore.read(resultId)?.trimmedPath
         if (!acquire(resultId)) {
-            Log.w(TAG, "Cattura $resultId in uso da un altro proprietario: non la scarto")
+            Log.w(TAG, "Capture $resultId in use by another owner: not discarding it")
             return
         }
         deleteCaptureFiles(raw, trimmedPath)
@@ -222,7 +289,7 @@ internal class DefaultPendingCaptureRepository(
 
     private fun deleteCaptureFiles(raw: File, trimmedPath: String?) {
         listOfNotNull(raw, trimmedPath?.let(::File)).forEach { file ->
-            if (file.exists() && !file.delete()) Log.w(TAG, "Impossibile cancellare ${file.path}")
+            if (file.exists() && !file.delete()) Log.w(TAG, "Cannot delete ${file.path}")
         }
     }
 }

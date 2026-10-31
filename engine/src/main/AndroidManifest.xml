@@ -1,24 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Lettura file audio dallo storage -->
+    <!-- Read audio files from storage -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
-    <!-- Android 16 (API 36): notifica per riproduzione in foreground -->
+    <!-- Android 16 (API 36): notification for foreground playback -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Impedisce la sospensione CPU durante l'elaborazione -->
+    <!-- Prevents CPU sleep during processing -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Cattura audio di sistema da un'altra app tramite MediaProjection -->
+    <!-- System audio capture from another app via MediaProjection -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
-    <!-- Visibilità pacchetti richiesta da Android 11+ per poter risolvere
-         l'UID delle app sorgente candidate tramite PackageManager.getApplicationInfo() -->
+    <!-- Package visibility required by Android 11+ to resolve
+         the UID of candidate source apps via PackageManager.getApplicationInfo() -->
     <queries>
         <package android:name="com.android.chrome" />
         <package android:name="com.google.android.youtube" />
@@ -31,11 +31,11 @@
 
     <application>
 
-        <!-- Schermata XML precedente: il launcher è ora la MainActivity Compose di :ui -->
+        <!-- Previous XML screen: the launcher is now the Compose MainActivity in :ui -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
-            <!-- Gestione file audio condivisi via altre app -->
+            <!-- Handles audio files shared from other apps -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -47,6 +47,17 @@
             android:name=".capture.SystemAudioCaptureService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+
+        <!-- Does not read notifications: the access granted to this service is only used to read
+             title and artist from the media session of the recorded app. -->
+        <service
+            android:name=".capture.NowPlayingListenerService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
     </application>
 </manifest>

@@ -3,6 +3,8 @@ package com.example.vocalremover.capture
 import android.content.Context
 import android.os.Process
 import java.util.UUID
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
 
 // Public (not internal): consumed cross-module by :ui's BubbleOverlayService,
 // which needs to peek/clear a stale claim without owning the full processing
@@ -25,7 +27,9 @@ data class CaptureTerminalResult(
     val outputPath: String? = null,
     val errorMessage: String? = null,
     val state: CaptureTerminalState = CaptureTerminalState.PENDING,
-    val savedOutputUri: String? = null
+    val savedOutputUri: String? = null,
+    /** Tracks seen during the capture; null if the media session was not readable. */
+    val trackTimeline: CaptureTrackTimeline? = null
 )
 
 internal data class CaptureWorkState(
@@ -108,6 +112,7 @@ class CaptureTerminalResultStore(context: Context) {
         private const val KEY_OWNER_ID = "owner_id"
         private const val KEY_OWNER_PROCESS_ID = "owner_process_id"
         private const val KEY_SAVED_OUTPUT_URI = "saved_output_uri"
+        private const val KEY_TRACK_TIMELINE = "track_timeline"
         private val lock = Any()
     }
 
@@ -119,7 +124,8 @@ class CaptureTerminalResultStore(context: Context) {
     fun persist(
         kind: CaptureTerminalKind,
         outputPath: String? = null,
-        errorMessage: String? = null
+        errorMessage: String? = null,
+        trackTimeline: CaptureTrackTimeline? = null
     ): CaptureTerminalResult {
         require(kind != CaptureTerminalKind.STOPPED || !outputPath.isNullOrBlank()) {
             "A stopped capture requires an output path"
@@ -132,7 +138,8 @@ class CaptureTerminalResultStore(context: Context) {
             id = UUID.randomUUID().toString(),
             kind = kind,
             outputPath = outputPath,
-            errorMessage = errorMessage
+            errorMessage = errorMessage,
+            trackTimeline = trackTimeline
         )
         synchronized(lock) {
             check(
@@ -147,8 +154,9 @@ class CaptureTerminalResultStore(context: Context) {
                     .remove(KEY_OWNER_ID)
                     .remove(KEY_OWNER_PROCESS_ID)
                     .remove(KEY_SAVED_OUTPUT_URI)
+                    .putString(KEY_TRACK_TIMELINE, trackTimeline?.let { Json.encodeToString(it) })
                     .commit()
-            ) { "Impossibile salvare il risultato della cattura" }
+            ) { "Cannot save the capture result" }
         }
         return result
     }
@@ -290,7 +298,21 @@ class CaptureTerminalResultStore(context: Context) {
             preferences.edit().clear().commit()
             return null
         }
-        return CaptureTerminalResult(id, kind, outputPath, errorMessage, state, savedOutputUri)
+        return CaptureTerminalResult(
+            id, kind, outputPath, errorMessage, state, savedOutputUri, readTrackTimelineLocked()
+        )
+    }
+
+    /** Optional metadata: if unreadable, only the track recognition is lost. */
+    private fun readTrackTimelineLocked(): CaptureTrackTimeline? {
+        val encoded = preferences.getString(KEY_TRACK_TIMELINE, null) ?: return null
+        return try {
+            Json.decodeFromString<CaptureTrackTimeline>(encoded)
+        } catch (e: SerializationException) {
+            null
+        } catch (e: IllegalArgumentException) {
+            null
+        }
     }
 
     private fun readStoppedResultLocked(resultId: String): CaptureTerminalResult? =

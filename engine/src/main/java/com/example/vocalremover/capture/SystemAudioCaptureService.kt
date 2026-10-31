@@ -12,15 +12,19 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
+import android.media.AudioTimestamp
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import android.util.Log
+import com.example.vocalremover.lyrics.LYRICS_LOG_TAG
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -55,7 +59,7 @@ class SystemAudioCaptureService : Service() {
             "com.example.vocalremover.action.SYSTEM_AUDIO_CAPTURE_STOPPED"
         const val ACTION_CAPTURE_ERROR =
             "com.example.vocalremover.action.SYSTEM_AUDIO_CAPTURE_ERROR"
-        /** Inviato una sola volta, quando dopo l'ascolto arriva il primo audio dalla sorgente. */
+        /** Sent only once, when the first audio from the source arrives after listening. */
         const val ACTION_CAPTURE_RECORDING_STARTED =
             "com.example.vocalremover.action.SYSTEM_AUDIO_CAPTURE_RECORDING_STARTED"
         const val ACTION_CAPTURE_PROCESSING_AVAILABLE =
@@ -90,6 +94,11 @@ class SystemAudioCaptureService : Service() {
     private var captureJob: Job? = null
     private var audioRecord: AudioRecord? = null
     private var mediaProjection: MediaProjection? = null
+
+    // Capture thread only: time of the file's first frame and estimate of the position in the track.
+    private var firstFrameElapsedMs: Long? = null
+    private var firstFrameTimestamped = false
+    private var lastAttachRetryMs = 0L
 
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
@@ -169,6 +178,8 @@ class SystemAudioCaptureService : Service() {
     }
 
     private fun capture(projection: MediaProjection, targetUid: Int) {
+        // Without notification access the tracker does nothing: the capture is unchanged.
+        val nowPlaying = NowPlayingTracker.create(this, targetUid)
         var writer: WavFileWriter? = null
         var outputFile: File? = null
         var result: CaptureResult? = null
@@ -176,8 +187,8 @@ class SystemAudioCaptureService : Service() {
         var pcmBytesWritten = 0L
 
         try {
-            // I chiamanti lo verificano già, ma il permesso può essere revocato prima dell'avvio:
-            // senza, AudioRecord.Builder.build() lancia SecurityException.
+            // Callers already check it, but the permission may be revoked before starting:
+            // without it, AudioRecord.Builder.build() throws SecurityException.
             if (
                 ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
                 PackageManager.PERMISSION_GRANTED
@@ -227,12 +238,13 @@ class SystemAudioCaptureService : Service() {
             }
 
             if (!stopRequested.get()) {
+                nowPlaying.start()
                 recordingStarted = startRecording(record)
                 if (!recordingStarted && !stopRequested.get()) {
                     throw CaptureException("Impossibile avviare la cattura audio")
                 }
                 if (recordingStarted) {
-                    pcmBytesWritten = captureLoop(record, captureWriter)
+                    pcmBytesWritten = captureLoop(record, captureWriter, nowPlaying)
                 }
             }
 
@@ -249,6 +261,7 @@ class SystemAudioCaptureService : Service() {
         } catch (error: Exception) {
             result = CaptureResult.Error(error.userMessage("Errore durante la cattura audio"))
         } finally {
+            nowPlaying.stop()
             stopAndReleaseAudioRecord()
             val closeError = closeWriter(writer)
             val finalResult = when {
@@ -265,7 +278,7 @@ class SystemAudioCaptureService : Service() {
                     emitBlocked()
                 }
 
-                is CaptureResult.Stopped -> emitStopped(finalResult.outputFile)
+                is CaptureResult.Stopped -> emitStopped(finalResult.outputFile, capturedTimeline(nowPlaying))
 
                 is CaptureResult.Error -> {
                     outputFile?.delete()
@@ -278,11 +291,11 @@ class SystemAudioCaptureService : Service() {
     }
 
     /**
-     * Legge finché l'utente non ferma la cattura o finché [PlaybackActivityGate] non
-     * chiude la registrazione: si resta in ascolto fino al primo audio dell'app sorgente,
-     * poi si registra fino a un silenzio prolungato (fine del brano).
+     * Reads until the user stops the capture or until [PlaybackActivityGate]
+     * closes the recording: it listens until the first audio from the source app,
+     * then records until a prolonged silence (end of the track).
      */
-    private fun captureLoop(record: AudioRecord, writer: WavFileWriter): Long {
+    private fun captureLoop(record: AudioRecord, writer: WavFileWriter, nowPlaying: NowPlayingTracker): Long {
         val bufferSize = (record.bufferSizeInFrames * BYTES_PER_FRAME)
             .coerceIn(BYTES_PER_FRAME, MAX_READ_BUFFER_SIZE)
         val readBuffer = ByteArray(bufferSize)
@@ -303,6 +316,7 @@ class SystemAudioCaptureService : Service() {
             when {
                 read > 0 -> {
                     val state = gate.process(readBuffer, 0, read, sink)
+                    trackSongPosition(record, gate, nowPlaying)
                     if (gate.audioDetected && !recordingStartedSent) {
                         recordingStartedSent = true
                         sendBroadcast(Intent(ACTION_CAPTURE_RECORDING_STARTED).setPackage(packageName))
@@ -322,6 +336,56 @@ class SystemAudioCaptureService : Service() {
 
         gate.finish(sink)
         return pcmBytesWritten
+    }
+
+    /** Timestamps the first frame of the file: track segments are measured from there. */
+    private fun trackSongPosition(record: AudioRecord, gate: PlaybackActivityGate, nowPlaying: NowPlayingTracker) {
+        val frame = gate.firstWrittenFrame ?: return
+        retryAttachIfDue(nowPlaying)
+        if (firstFrameElapsedMs != null) return
+        val timestamped = frameElapsedMs(record, frame)
+        // Without a timestamp the time is approximate: good enough for segments, not for positions.
+        firstFrameElapsedMs = timestamped ?: SystemClock.elapsedRealtime()
+        firstFrameTimestamped = timestamped != null
+        Log.i(LYRICS_LOG_TAG, "First frame of the file: $frame (audio timestamp ${if (timestamped != null) "ok" else "missing"})")
+    }
+
+    /** On the first audio and then every 2 s, until the app's session is attached. */
+    private fun retryAttachIfDue(nowPlaying: NowPlayingTracker) {
+        val now = SystemClock.elapsedRealtime()
+        if (nowPlaying.isAttached() || now - lastAttachRetryMs < 2_000) return
+        lastAttachRetryMs = now
+        nowPlaying.retryAttach()
+    }
+
+    /** Time (elapsedRealtime) at which [frame], counted from the start of [record], was captured. */
+    private fun frameElapsedMs(record: AudioRecord, frame: Long): Long? {
+        val timestamp = AudioTimestamp()
+        if (record.getTimestamp(timestamp, AudioTimestamp.TIMEBASE_MONOTONIC) != AudioRecord.SUCCESS) {
+            return null
+        }
+        val monotonicToElapsedNs = SystemClock.elapsedRealtimeNanos() - System.nanoTime()
+        val frameNs = timestamp.nanoTime +
+            (frame - timestamp.framePosition) * 1_000_000_000L / SAMPLE_RATE +
+            monotonicToElapsedNs
+        return frameNs / 1_000_000
+    }
+
+    private fun capturedTimeline(nowPlaying: NowPlayingTracker): CaptureTrackTimeline? {
+        val firstFrame = firstFrameElapsedMs ?: return null
+        val timeline = nowPlaying.timeline(firstFrame, firstFrameTimestamped)
+        if (timeline == null) {
+            Log.i(LYRICS_LOG_TAG, "Capture without track metadata")
+        } else {
+            timeline.segments.forEach {
+                Log.i(
+                    LYRICS_LOG_TAG,
+                    "Segment from ${it.startMs} ms: ${it.artist} - ${it.title}, duration ${it.trackDurationMs} ms, " +
+                        "position in the track ${it.songPositionAtStartMs} ms"
+                )
+            }
+        }
+        return timeline
     }
 
     private fun appendPcm(
@@ -427,11 +491,12 @@ class SystemAudioCaptureService : Service() {
         emitTerminal(ACTION_CAPTURE_BLOCKED, CaptureTerminalKind.BLOCKED)
     }
 
-    private fun emitStopped(outputFile: File) {
+    private fun emitStopped(outputFile: File, trackTimeline: CaptureTrackTimeline?) {
         emitTerminal(
             ACTION_CAPTURE_STOPPED,
             CaptureTerminalKind.STOPPED,
-            outputPath = outputFile.absolutePath
+            outputPath = outputFile.absolutePath,
+            trackTimeline = trackTimeline
         )
     }
 
@@ -443,11 +508,12 @@ class SystemAudioCaptureService : Service() {
         action: String,
         kind: CaptureTerminalKind,
         outputPath: String? = null,
-        errorMessage: String? = null
+        errorMessage: String? = null,
+        trackTimeline: CaptureTrackTimeline? = null
     ) {
         if (!terminalBroadcastSent.compareAndSet(false, true)) return
         try {
-            CaptureTerminalResultStore(this).persist(kind, outputPath, errorMessage)
+            CaptureTerminalResultStore(this).persist(kind, outputPath, errorMessage, trackTimeline)
         } catch (_: Exception) {
             if (kind == CaptureTerminalKind.STOPPED) File(outputPath.orEmpty()).delete()
             return

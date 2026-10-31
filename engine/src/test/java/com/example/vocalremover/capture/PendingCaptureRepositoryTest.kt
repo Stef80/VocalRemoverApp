@@ -17,6 +17,9 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowProcess
 import java.io.File
+import com.example.vocalremover.lyrics.LyricsScheduler
+import com.example.vocalremover.lyrics.LyricsStatus
+import com.example.vocalremover.lyrics.TrackLyricsStore
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -29,7 +32,7 @@ class PendingCaptureRepositoryTest {
 
     @Before
     fun setUp() {
-        // Lo store rifiuta pid 0, che è il default di Robolectric.
+        // The store rejects pid 0, which is Robolectric's default.
         ShadowProcess.setPid(1234)
         cacheDir = File("build/test-pending-capture/${System.nanoTime()}").apply { mkdirs() }
         raw = File(cacheDir, "system_audio_capture_1.wav")
@@ -41,8 +44,16 @@ class PendingCaptureRepositoryTest {
         cacheDir.deleteRecursively()
     }
 
-    private fun repository(clock: Long = 0L) =
-        DefaultPendingCaptureRepository(context, cacheDir = cacheDir, clock = { clock })
+    private val scheduled = mutableListOf<String>()
+    private val scheduler = object : LyricsScheduler {
+        override fun schedule(savedUri: String) { scheduled += savedUri }
+        override fun cancel(savedUri: String) = Unit
+    }
+    private val lyricsStore by lazy { TrackLyricsStore(File(cacheDir, "lyrics")) }
+
+    private fun repository(clock: Long = 0L) = DefaultPendingCaptureRepository(
+        context, cacheDir = cacheDir, clock = { clock }, lyricsStore = lyricsStore, lyricsScheduler = scheduler,
+    )
 
     private fun persistCapture() {
         CaptureTerminalResultStore(context).persist(CaptureTerminalKind.STOPPED, outputPath = raw.path)
@@ -201,5 +212,144 @@ class PendingCaptureRepositoryTest {
         assertTrue(trimmed.exists())
         assertTrue(other.exists())
         assertTrue(orphans.none { it.exists() })
+    }
+
+    private fun segment(title: String, durationMs: Long, startMs: Long, position: Long?) =
+        TrackSegment(title, "Gruppo", null, durationMs, null, startMs, position)
+
+    /** A single track, started 40 s before the file. */
+    private val songOnly = CaptureTrackTimeline("com.example.player", listOf(segment("Brano", 200_000, 0, 40_000)))
+
+    private fun persistWithTimeline(timeline: CaptureTrackTimeline = songOnly) =
+        CaptureTerminalResultStore(context).persist(CaptureTerminalKind.STOPPED, outputPath = raw.path, trackTimeline = timeline)
+
+    @Test
+    fun `capture with a recognized track proposes artist and title as name`() {
+        persistWithTimeline()
+
+        val capture = repository().load()!!
+
+        assertEquals("Gruppo - Brano", capture.displayName)
+        assertEquals(songOnly, capture.trackTimeline)
+        assertNull(capture.trimmedFile)
+    }
+
+    @Test
+    fun `capture without track info has no timeline`() {
+        persistCapture()
+        assertNull(repository().load()!!.trackTimeline)
+    }
+
+    @Test
+    fun `corrupted timeline is ignored`() {
+        persistWithTimeline()
+        context.getSharedPreferences("capture_terminal_result", Context.MODE_PRIVATE)
+            .edit().putString("track_timeline", "{non json").commit()
+
+        val capture = repository().load()!!
+
+        assertNull(capture.trackTimeline)
+        assertEquals(RecordingFileNaming.defaultName(0L), capture.displayName)
+    }
+
+    @Test
+    fun `initial advertisement is trimmed automatically`() {
+        writePcm16StereoWav(raw, rampSamples(44_100 * 20)) // 20 s
+        persistWithTimeline(
+            CaptureTrackTimeline(
+                "com.example.player",
+                listOf(segment("Pubblicità", 6_000, 0, 0), segment("Brano", 200_000, 6_000, 0)),
+            )
+        )
+
+        val capture = repository().load()!!
+
+        assertEquals(6_000L, capture.trimStartMs)
+        assertEquals(20_000L, capture.trimEndMs)
+        assertEquals("Gruppo - Brano", capture.displayName)
+        assertEquals(14_000L, WavFileReader.durationMs(WavFileReader.readInfo(capture.trimmedFile!!)))
+    }
+
+    @Test
+    fun `complete processing writes pending lyrics with the offset at the trim start`() {
+        persistWithTimeline()
+        val repo = repository().apply { load() }
+        repo.saveEdit("Gruppo - Brano", 1000, 2000)
+        assertTrue(repo.beginProcessing())
+
+        repo.completeProcessing(savedUri)
+
+        val stored = lyricsStore.read(savedUri.toString())!!
+        assertEquals(LyricsStatus.PENDING, stored.status)
+        assertEquals(41_000L, stored.track.songOffsetMs)
+        assertEquals(listOf(savedUri.toString()), scheduled)
+    }
+
+    @Test
+    fun `complete processing uses the track kept after the trim`() {
+        persistWithTimeline(
+            CaptureTrackTimeline(
+                "com.example.player",
+                listOf(segment("Pubblicità", 18_000, 0, 0), segment("Brano", 200_000, 1_000, 0)),
+            )
+        )
+        val repo = repository().apply { load() }
+        repo.saveEdit("Gruppo - Brano", 1500, 3000)
+        assertTrue(repo.beginProcessing())
+
+        repo.completeProcessing(savedUri)
+
+        val track = lyricsStore.read(savedUri.toString())!!.track
+        assertEquals("Brano", track.title)
+        assertEquals(200_000L, track.trackDurationMs)
+        assertEquals(500L, track.songOffsetMs)
+    }
+
+    @Test
+    fun `complete processing without track info writes nothing`() {
+        persistCapture()
+        val repo = repository().apply { load() }
+        assertTrue(repo.beginProcessing())
+
+        repo.completeProcessing(savedUri)
+
+        assertNull(lyricsStore.read(savedUri.toString()))
+        assertTrue(scheduled.isEmpty())
+    }
+
+    @Test
+    fun `recovery of a saved capture schedules the download`() {
+        persistWithTimeline()
+        val store = CaptureTerminalResultStore(context)
+        val id = store.peekStoppedResult()!!.id
+        val lease = store.acquireStoppedResult("vecchio-proprietario")!!
+        assertTrue(store.markSaved(id, "vecchio-proprietario", savedUri.toString()))
+        assertTrue(store.releaseStoppedResult(lease.result.id, "vecchio-proprietario"))
+
+        assertNull(repository().load())
+
+        assertEquals(LyricsStatus.PENDING, lyricsStore.read(savedUri.toString())!!.status)
+        assertEquals(listOf(savedUri.toString()), scheduled)
+    }
+
+    @Test
+    fun `recovery does not overwrite lyrics already downloaded`() {
+        persistWithTimeline()
+        val store = CaptureTerminalResultStore(context)
+        val id = store.peekStoppedResult()!!.id
+        store.acquireStoppedResult("vecchio-proprietario")!!
+        store.markSaved(id, "vecchio-proprietario", savedUri.toString())
+        store.releaseStoppedResult(id, "vecchio-proprietario")
+        val done = com.example.vocalremover.lyrics.TrackLyrics(
+            savedUri.toString(),
+            CapturedTrackInfo("Brano", "Gruppo", null, 200_000, 40_000, "com.example.player", null),
+            LyricsStatus.FOUND,
+            "lrclib:1",
+        )
+        lyricsStore.write(done)
+
+        repository().load()
+
+        assertEquals(done, lyricsStore.read(savedUri.toString()))
     }
 }

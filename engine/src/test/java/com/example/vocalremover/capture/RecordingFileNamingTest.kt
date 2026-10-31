@@ -106,4 +106,12 @@ class RecordingFileNamingTest {
     @Test
     fun `titleFromLibraryName leaves names without extension untouched`() =
         assertEquals("Canzone", RecordingFileNaming.titleFromLibraryName("Canzone"))
+
+    @Test
+    fun `nameFromTrack joins artist and title`() = assertEquals(
+        "Gruppo - Brano",
+        RecordingFileNaming.nameFromTrack(
+            CapturedTrackInfo(" Brano ", "Gruppo", null, null, null, "com.example.player", null)
+        ),
+    )
 }

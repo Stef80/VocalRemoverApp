@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -11,7 +12,7 @@ android {
         minSdk = 26
     }
 
-    // Codice del benchmark condiviso tra questi test JVM e l'androidTest di :ui: non finisce nell'APK.
+    // Benchmark code shared between these JVM tests and :ui's androidTest: it never ships in the APK.
     sourceSets {
         getByName("test").java.srcDir("src/benchmarkShared/java")
     }
@@ -48,8 +49,8 @@ android {
 
     testOptions {
         unitTests.all { test ->
-            // Robolectric scarica android-all (~200 MB) passando da java.io.tmpdir:
-            // su una /tmp piccola finisce lo spazio, quindi si usa una cartella sotto build/.
+            // Robolectric downloads android-all (~200 MB) through java.io.tmpdir:
+            // a small /tmp runs out of space, so a folder under build/ is used.
             val tmp = layout.buildDirectory.dir("tmp/unitTest").get().asFile
             test.doFirst { tmp.mkdirs() }
             test.systemProperty("java.io.tmpdir", tmp.absolutePath)
@@ -58,6 +59,12 @@ android {
 }
 
 dependencies {
+    // External sources (song lyrics): :engine only sees interfaces and models.
+    implementation(project(":connections"))
+    implementation(libs.kotlinx.serialization.json)
+    // Lyrics download in the background, even with the app closed.
+    implementation(libs.androidx.work.runtime.ktx)
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
@@ -65,18 +72,18 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
-    // ONNX Runtime (sostituisce TensorFlow Lite: nessuna conversione TF richiesta,
-    // usa modelli MDX-Net già pre-convertiti in formato .onnx dalla community UVR)
-    // v1.23.0+ richiesto: allinea anche il wrapper JNI a pagine 16 KB
-    // (obbligatorio per Google Play su Android 15+ dal 1° novembre 2025)
-    // La variante qnn usa il pacchetto con QNN EP (stessa API Java, include la dipendenza
-    // com.qualcomm.qti:qnn-runtime); i due AAR non possono convivere nello stesso APK.
+    // ONNX Runtime (replaces TensorFlow Lite: no TF conversion needed,
+    // uses MDX-Net models already converted to .onnx by the UVR community)
+    // v1.23.0+ required: also aligns the JNI wrapper to 16 KB pages
+    // (mandatory for Google Play on Android 15+ since November 1st, 2025)
+    // The qnn variant uses the package with the QNN EP (same Java API, includes the
+    // com.qualcomm.qti:qnn-runtime dependency); the two AARs cannot share one APK.
     "cpuImplementation"("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
     "webgpuImplementation"("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
     "qnnImplementation"("com.microsoft.onnxruntime:onnxruntime-android-qnn:1.24.3")
 
 
-    // TarsosDSP rimosso: decodifica gestita con MediaExtractor/MediaCodec nativi
+    // TarsosDSP removed: decoding handled with native MediaExtractor/MediaCodec
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
@@ -85,9 +92,9 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
 
-    // Test unitari JVM (nessun test esisteva finora nel modulo)
+    // JVM unit tests (the module had no tests until now)
     testImplementation("junit:junit:4.13.2")
-    // Solo test: Robolectric per creare Uri sulla JVM, coroutines-test per SongProcessor
+    // Tests only: Robolectric to create Uris on the JVM, coroutines-test for SongProcessor
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }

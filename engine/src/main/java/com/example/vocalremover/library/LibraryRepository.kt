@@ -11,31 +11,38 @@ import android.os.Build
 import android.provider.MediaStore
 import com.example.vocalremover.capture.RecordingFileNaming
 import com.example.vocalremover.capture.RecordingSaver
+import com.example.vocalremover.lyrics.LyricsScheduler
+import com.example.vocalremover.lyrics.TrackLyricsRepository
+import com.example.vocalremover.lyrics.TrackLyricsStore
+import com.example.vocalremover.lyrics.WorkManagerLyricsScheduler
 
-/** Brano elaborato presente in Music/VocalRemover. */
+/** Processed track in Music/VocalRemover. */
 data class LibraryTrack(val uri: Uri, val title: String, val durationMs: Long)
 
-/** Esito di una rinomina o di un'eliminazione. */
+/** Outcome of a rename or a deletion. */
 sealed interface LibraryEditResult {
     data object Done : LibraryEditResult
 
     /**
-     * File creato da un'installazione precedente dell'app: serve il consenso dell'utente
-     * (finestra di sistema da lanciare con `intentSender`), poi si riprova la stessa azione.
+     * File created by a previous install of the app: user consent is needed
+     * (system dialog to launch with `intentSender`), then the same action is retried.
      */
     data class NeedsConsent(val intentSender: IntentSender) : LibraryEditResult
 }
 
-/** Elenco dei brani elaborati salvati da `RecordingSaver.saveProcessedStereoAsWav`. */
+/** List of the processed tracks saved by `RecordingSaver.saveProcessedStereoAsWav`. */
 interface LibraryRepository {
 
-    /** Bloccante: va chiamata fuori dal main thread. Più recenti per primi. */
+    /** Blocking: must be called off the main thread. Most recent first. */
     fun load(): List<LibraryTrack>
 
-    /** Bloccante. Cancella il file dal telefono; le eccezioni diverse dal consenso si propagano. */
+    /**
+     * Blocking. Deletes the file from the phone, its lyrics and any queued download;
+     * exceptions other than consent are propagated.
+     */
     fun delete(uri: Uri): LibraryEditResult
 
-    /** Bloccante. Il file diventa `<titolo>_strumentale.wav`; l'Uri resta lo stesso. */
+    /** Blocking. The file becomes `<title>_strumentale.wav`; the Uri stays the same. */
     fun rename(uri: Uri, title: String): LibraryEditResult
 
     companion object {
@@ -45,11 +52,15 @@ interface LibraryRepository {
 }
 
 /**
- * Legge da MediaStore i WAV in `Music/VocalRemover/` (le registrazioni grezze in `raw/` restano
- * fuori). Da Android 10 l'app vede senza permessi i file creati da lei; sotto API 29
- * `RELATIVE_PATH` non esiste e il salvataggio stesso non funziona, quindi la libreria è vuota.
+ * Reads from MediaStore the WAVs in `Music/VocalRemover/` (raw recordings in `raw/` stay
+ * out). Since Android 10 the app sees the files it created without permissions; below API 29
+ * `RELATIVE_PATH` does not exist and saving itself does not work, so the library is empty.
  */
-internal class MediaStoreLibraryRepository(private val context: Context) : LibraryRepository {
+internal class MediaStoreLibraryRepository(
+    private val context: Context,
+    private val lyricsStore: TrackLyricsStore = TrackLyricsRepository.lyricsStore(context),
+    private val lyricsScheduler: LyricsScheduler = WorkManagerLyricsScheduler(context, lyricsStore),
+) : LibraryRepository {
 
     override fun load(): List<LibraryTrack> {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return emptyList()
@@ -63,7 +74,7 @@ internal class MediaStoreLibraryRepository(private val context: Context) : Libra
         val selection = "${MediaStore.Audio.Media.RELATIVE_PATH} = ? AND " +
             "${MediaStore.Audio.Media.IS_PENDING} = 0 AND " +
             "${MediaStore.Audio.Media.DISPLAY_NAME} LIKE ?"
-        // MediaStore salva il percorso con la barra finale.
+        // MediaStore stores the path with a trailing slash.
         val arguments = arrayOf("${RecordingSaver.BASE_RELATIVE_PATH}/", "%.wav")
         val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
         return context.contentResolver
@@ -74,6 +85,9 @@ internal class MediaStoreLibraryRepository(private val context: Context) : Libra
 
     override fun delete(uri: Uri): LibraryEditResult = withConsent {
         context.contentResolver.delete(uri, null, null)
+        // Only after a successful deletion: with the consent request the track stays.
+        lyricsScheduler.cancel(uri.toString())
+        lyricsStore.delete(uri.toString())
     }
 
     override fun rename(uri: Uri, title: String): LibraryEditResult = withConsent {
@@ -87,8 +101,8 @@ internal class MediaStoreLibraryRepository(private val context: Context) : Libra
     }
 
     /**
-     * Da Android 10 MediaStore rifiuta di toccare i file di un'altra installazione con una
-     * `RecoverableSecurityException`, che contiene la finestra con cui l'utente può consentirlo.
+     * Since Android 10 MediaStore refuses to touch files of another install with a
+     * `RecoverableSecurityException`, which contains the dialog through which the user can allow it.
      */
     private inline fun withConsent(action: () -> Unit): LibraryEditResult {
         try {
@@ -103,7 +117,7 @@ internal class MediaStoreLibraryRepository(private val context: Context) : Libra
     }
 }
 
-/** Converte le righe di MediaStore nell'ordine del cursore. Non chiude il cursore. */
+/** Converts MediaStore rows in cursor order. Does not close the cursor. */
 internal object LibraryCursorReader {
 
     fun read(cursor: Cursor, collection: Uri): List<LibraryTrack> {

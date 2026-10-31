@@ -23,7 +23,7 @@ class PlaybackActivityGateTest {
 
     private fun silence(ms: Int): ByteArray = ByteArray(bytesFor(ms))
 
-    /** Sinusoide a 440 Hz, 16 bit little-endian, identica su entrambi i canali. */
+    /** 440 Hz sine, 16-bit little-endian, identical on both channels. */
     private fun tone(ms: Int, amplitude: Double = 0.3): ByteArray {
         val frames = (sampleRate.toLong() * ms / 1_000).toInt()
         val bytes = ByteArray(frames * channels * 2)
@@ -174,5 +174,53 @@ class PlaybackActivityGateTest {
         chunkedGate.finish(chunked.sink)
 
         assertArrayEquals(whole.out.toByteArray(), chunked.out.toByteArray())
+    }
+
+    // 20 ms at 44 100 Hz = 882 frames per window; 300 ms pre-roll = 15 windows.
+    private val windowFrames = 882L
+
+    @Test
+    fun `first written frame accounts for the pre-roll`() {
+        val gate = gate()
+        val collector = Collector()
+        gate.process(silence(2_000), 0, bytesFor(2_000), collector.sink)
+        gate.process(tone(100), 0, bytesFor(100), collector.sink)
+        assertEquals((100 - 15) * windowFrames, gate.firstWrittenFrame)
+    }
+
+    @Test
+    fun `first written frame is zero when the silence is shorter than the pre-roll`() {
+        val gate = gate()
+        val collector = Collector()
+        gate.process(silence(100), 0, bytesFor(100), collector.sink)
+        gate.process(tone(100), 0, bytesFor(100), collector.sink)
+        assertEquals(0L, gate.firstWrittenFrame)
+    }
+
+    @Test
+    fun `first written frame is null while listening`() {
+        val gate = gate()
+        gate.process(silence(1_000), 0, bytesFor(1_000), Collector().sink)
+        assertEquals(null, gate.firstWrittenFrame)
+    }
+
+    @Test
+    fun `first written frame without pre-roll is the first audio window`() {
+        val gate = PlaybackActivityGate(sampleRate, channels, preRollMs = 0)
+        val collector = Collector()
+        gate.process(silence(200), 0, bytesFor(200), collector.sink)
+        gate.process(tone(100), 0, bytesFor(100), collector.sink)
+        assertEquals(10 * windowFrames, gate.firstWrittenFrame)
+    }
+
+    @Test
+    fun `first written frame matches the bytes written before the audio`() {
+        val gate = gate()
+        val collector = Collector()
+        gate.process(silence(2_000), 0, bytesFor(2_000), collector.sink)
+        gate.process(tone(100), 0, bytesFor(100), collector.sink)
+        val preRollBytes = 15 * windowFrames * channels * 2
+        val toneStart = collector.out.toByteArray().copyOfRange(preRollBytes.toInt(), preRollBytes.toInt() + 8)
+        assertArrayEquals(tone(100).copyOfRange(0, 8), toneStart)
     }
 }
