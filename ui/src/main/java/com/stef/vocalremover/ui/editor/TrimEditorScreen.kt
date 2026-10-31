@@ -153,13 +153,13 @@ private fun EditorTopBar(onClose: () -> Unit) {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onClose) {
+/*        IconButton(onClick = onClose) {
             Icon(
                 painter = painterResource(R.drawable.ic_arrow_back),
                 contentDescription = stringResource(R.string.control_back_description),
                 tint = MaterialTheme.colorScheme.onBackground,
             )
-        }
+        }*/
         Row(
             modifier = Modifier.padding(start = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -168,7 +168,7 @@ private fun EditorTopBar(onClose: () -> Unit) {
             Image(
                 painter = painterResource(R.drawable.logo_corallo_blu),
                 contentDescription = null,
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(56.dp),
             )
             Text(
                 text = stringResource(R.string.editor_title),

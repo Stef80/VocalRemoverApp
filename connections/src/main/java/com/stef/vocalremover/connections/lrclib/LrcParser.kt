@@ -5,21 +5,26 @@ import com.stef.vocalremover.connections.LyricLine
 /** Parses the LRC format (`[mm:ss.xx]text`) into lines sorted by start. */
 internal object LrcParser {
 
-    private val TIME_TAG = Regex("""\[(\d+):(\d{2})(?:[.:](\d{1,3}))?]""")
+    // Minutes capped at 5 digits: longer values would overflow toLong() or the ms math,
+    // so such tags don't match and the line is dropped like any untagged line.
+    private val TIME_TAG = Regex("""\[(\d{1,5}):(\d{2})(?:[.:](\d{1,3}))?]""")
 
     fun parse(lrc: String): List<LyricLine> {
         val lines = mutableListOf<LyricLine>()
         for (raw in lrc.lines()) {
-            var rest = raw.trimEnd('\r')
+            val line = raw.trimEnd('\r')
             val starts = mutableListOf<Long>()
             // Time tags sit at the start of the line, possibly more than one (choruses).
+            // Advance an index instead of slicing the line per tag: slicing is quadratic.
+            var pos = 0
             while (true) {
-                val match = TIME_TAG.matchAt(rest, 0) ?: break
+                val match = TIME_TAG.matchAt(line, pos) ?: break
                 starts += toMs(match)
-                rest = rest.substring(match.range.last + 1)
+                pos = match.range.last + 1
             }
             // Lines without a time tag: metadata ([ar:...]) or loose text, ignored.
-            starts.forEach { lines += LyricLine(it, rest.trim()) }
+            val text = line.substring(pos).trim()
+            starts.forEach { lines += LyricLine(it, text) }
         }
         return lines.sortedBy { it.startMs }
     }

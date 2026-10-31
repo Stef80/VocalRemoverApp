@@ -31,6 +31,7 @@ internal class LrclibLyricsProvider(
 
     private companion object {
         const val DURATION_TOLERANCE_MS = 2_000L
+        const val MAX_RETRY_AFTER_SECONDS = 24 * 60 * 60L
         val json = Json { ignoreUnknownKeys = true }
     }
 
@@ -148,7 +149,11 @@ internal class LrclibLyricsProvider(
     private fun durationSeconds(durationMs: Long?): Long? =
         durationMs?.let { (it / 1_000.0).roundToLong() }?.takeIf { it in 1..3_600 }
 
-    /** Only the whole-seconds format; the HTTP-date form is ignored. */
+    /**
+     * Only the whole-seconds format; the HTTP-date form is ignored. Capped before the
+     * multiplication, so a huge value can neither overflow nor park the track for years.
+     */
     private fun retryAfterMs(header: String?): Long? =
-        header?.trim()?.toLongOrNull()?.takeIf { it >= 0 }?.times(1_000)
+        header?.trim()?.toLongOrNull()?.takeIf { it >= 0 }
+            ?.coerceAtMost(MAX_RETRY_AFTER_SECONDS)?.times(1_000)
 }
