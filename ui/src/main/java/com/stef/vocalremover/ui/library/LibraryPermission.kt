@@ -23,11 +23,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 
 /**
- * Permesso per leggere anche i brani della libreria che l'app non ha creato in questa
- * installazione (es. dopo una reinstallazione). Sotto Android 10 la libreria è sempre vuota,
- * quindi non serve nulla.
+ * Permission to also read the library tracks the app did not create in this
+ * install (e.g. after a reinstall). Below Android 10 the library is always empty,
+ * so nothing is needed.
  */
-// InlinedApi: la costante è solo una stringa e la si usa solo da API 33 (controllo su `sdkInt`).
+// InlinedApi: the constant is just a string and is used only from API 33 (check on `sdkInt`).
 @SuppressLint("InlinedApi")
 internal fun libraryReadPermission(sdkInt: Int = Build.VERSION.SDK_INT): String? = when {
     sdkInt >= Build.VERSION_CODES.TIRAMISU -> Manifest.permission.READ_MEDIA_AUDIO
@@ -38,25 +38,25 @@ internal fun libraryReadPermission(sdkInt: Int = Build.VERSION.SDK_INT): String?
 internal enum class PermissionAction { Request, OpenSettings }
 
 /**
- * Cosa fa il pulsante "Consenti": dopo una richiesta già fatta, se il sistema non mostrerebbe più
- * la finestra (negato definitivamente) l'unica strada sono le impostazioni dell'app.
+ * What the "Consenti" button does: after a request already made, if the system would no longer show
+ * the dialog (permanently denied) the only way is the app settings.
  */
 internal fun permissionAction(alreadyAsked: Boolean, showRationale: Boolean): PermissionAction =
     if (alreadyAsked && !showRationale) PermissionAction.OpenSettings else PermissionAction.Request
 
-/** Stato del permesso della libreria per la schermata. */
+/** Library permission state for the screen. */
 internal class LibraryPermissionState(
-    /** `true` se il permesso è concesso o non serve. */
+    /** `true` if the permission is granted or not needed. */
     val granted: Boolean,
-    /** Chiede il permesso oppure, se negato definitivamente, apre le impostazioni dell'app. */
+    /** Requests the permission or, if permanently denied, opens the app settings. */
     val requestOrOpenSettings: () -> Unit,
-    /** Da chiamare al ritorno in primo piano (es. dalle impostazioni). */
+    /** To be called when coming back to the foreground (e.g. from settings). */
     val recheck: () -> Unit,
 )
 
 /**
- * Chiede il permesso da sola la prima volta che la schermata compare; `onResult` viene chiamata
- * dopo ogni risposta, così la lista si può rileggere.
+ * Requests the permission on its own the first time the screen appears; `onResult` is called
+ * after every answer, so the list can be read again.
  */
 @Composable
 internal fun rememberLibraryPermissionState(onResult: () -> Unit): LibraryPermissionState {

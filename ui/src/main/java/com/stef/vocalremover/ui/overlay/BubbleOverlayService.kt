@@ -45,10 +45,10 @@ import com.stef.vocalremover.ui.MainActivity as LauncherMainActivity
 import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 
 /**
- * Foreground service che disegna il widget flottante di registrazione sopra
- * le altre app. Orchestration-only: non implementa la cattura audio (delegata
- * interamente a `SystemAudioCaptureService`, invariato) né il consenso
- * MediaProjection (delegato a `MediaProjectionConsentActivity`).
+ * Foreground service that draws the floating recording widget on top of
+ * other apps. Orchestration-only: it implements neither audio capture (delegated
+ * entirely to `SystemAudioCaptureService`, unchanged) nor the MediaProjection
+ * consent (delegated to `MediaProjectionConsentActivity`).
  */
 @RequiresApi(Build.VERSION_CODES.Q)
 class BubbleOverlayService : Service() {
@@ -58,28 +58,28 @@ class BubbleOverlayService : Service() {
         private const val NOTIFICATION_ID = 4343
         private const val CLOSE_REQUEST_CODE = 1
         private const val ERROR_DISPLAY_MS = 3_000L
-        /** Se il servizio di cattura non conferma l'annullamento entro questo tempo si chiude comunque. */
+        /** If the capture service does not confirm the cancellation within this time, it closes anyway. */
         private const val DISMISS_CANCEL_TIMEOUT_MS = 2_000L
         private const val DISMISS_TARGET_BOTTOM_MARGIN_DP = 48
         private const val DISMISS_HIT_RADIUS_DP = 72
-        /** Metà del lato del bubble collassato (64.dp in `BubbleOverlayContent`). */
+        /** Half the side of the collapsed bubble (64.dp in `BubbleOverlayContent`). */
         private const val BUBBLE_RADIUS_DP = 32
         const val ACTION_CLOSE = "com.example.vocalremover.action.CLOSE_BUBBLE_OVERLAY"
         const val ACTION_REQUEST_STOP =
             "com.example.vocalremover.action.REQUEST_STOP_BUBBLE_CAPTURE"
 
-        /** True se il permesso di overlay è già concesso su questo device. */
+        /** True if the overlay permission is already granted on this device. */
         fun canShowOverlay(context: Context): Boolean = Settings.canDrawOverlays(context)
 
         /**
-         * Intent per chiedere al servizio di fermare la cattura in corso da un
-         * punto di ingresso diverso dal bubble stesso (es. il pulsante "Ferma
-         * registrazione" in `ImportSongScreen`).
+         * Intent to ask the service to stop the capture in progress from an
+         * entry point other than the bubble itself (e.g. the "Ferma
+         * registrazione" button in `ImportSongScreen`).
          */
         fun requestStopIntent(context: Context): Intent =
             Intent(context, BubbleOverlayService::class.java).setAction(ACTION_REQUEST_STOP)
 
-        /** Intent per chiedere all'utente il permesso di overlay nelle impostazioni di sistema. */
+        /** Intent to ask the user for the overlay permission in the system settings. */
         fun overlayPermissionSettingsIntent(context: Context): Intent =
             Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -101,13 +101,13 @@ class BubbleOverlayService : Service() {
     private var suggestions by mutableStateOf(emptyList<String>())
     private var dismissHovering by mutableStateOf(false)
     private var draggingWithDismissTarget = false
-    /** Chiusura richiesta trascinando sulla X durante l'ascolto: si attende l'annullamento. */
+    /** Close requested by dragging onto the X while listening: waits for the cancellation. */
     private var closeAfterCancel = false
 
     private val captureResultReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            // Durante l'annullamento l'esito "blocked"/"error" è atteso (nessun audio
-            // acquisito): si chiude in silenzio invece di mostrare un errore.
+            // During cancellation the "blocked"/"error" outcome is expected (no audio
+            // captured): close silently instead of showing an error.
             if (state.phase == BubbleOverlayPhase.CANCELLING &&
                 intent.action != SystemAudioCaptureService.ACTION_CAPTURE_STOPPED &&
                 intent.action != SystemAudioCaptureService.ACTION_CAPTURE_RECORDING_STARTED
@@ -237,10 +237,10 @@ class BubbleOverlayService : Service() {
             composeView = view
             addDismissTarget(owner)
         } catch (error: Exception) {
-            // Overlay revocato tra la richiesta di avvio e questo punto (TOCTOU):
-            // senza questo guard l'eccezione risalirebbe fuori da onCreate() e
-            // farebbe crashare il processo del servizio lasciando la notifica
-            // foreground e i receiver registrati senza ripulirli.
+            // Overlay revoked between the start request and this point (TOCTOU):
+            // without this guard the exception would propagate out of onCreate() and
+            // crash the service process, leaving the foreground notification
+            // and the registered receivers without cleaning them up.
             owner.detach()
             Toast.makeText(
                 this,
@@ -260,8 +260,8 @@ class BubbleOverlayService : Service() {
     }
 
     /**
-     * Finestra con la X in basso al centro, non toccabile: solo grafica. Resta nascosta
-     * e compare durante il trascinamento del bubble.
+     * Window with the X at the bottom center, not touchable: graphics only. It stays hidden
+     * and appears while the bubble is dragged.
      */
     private fun addDismissTarget(owner: OverlayLifecycleOwner) {
         val view = ComposeView(this).apply {
@@ -288,7 +288,7 @@ class BubbleOverlayService : Service() {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             y = dpToPx(DISMISS_TARGET_BOTTOM_MARGIN_DP).toInt()
         }
-        // Senza la X il bubble funziona lo stesso: un errore qui non deve chiudere il widget.
+        // Without the X the bubble still works: an error here must not close the widget.
         runCatching { windowManager.addView(view, params) }
             .onSuccess { dismissView = view }
     }
@@ -307,7 +307,7 @@ class BubbleOverlayService : Service() {
         draggingWithDismissTarget = false
         dismissHovering = false
         dismissView?.visibility = View.GONE
-        // La registrazione può essere partita durante il trascinamento: si ricontrolla qui.
+        // Recording may have started during the drag: check again here.
         if (overTarget && BubbleDismissPolicy.canDismiss(state.phase)) dismissBubble()
     }
 
@@ -318,7 +318,7 @@ class BubbleOverlayService : Service() {
         val bubbleLocation = IntArray(2).also { bubble.getLocationOnScreen(it) }
         val targetLocation = IntArray(2).also { target.getLocationOnScreen(it) }
         val bubbleRadius = dpToPx(BUBBLE_RADIUS_DP)
-        // Il bubble è in basso a sinistra della sua finestra (sopra c'è il fumetto).
+        // The bubble is at the bottom left of its window (the speech bubble is above).
         return BubbleDismissPolicy.isOverTarget(
             bubbleCenterX = bubbleLocation[0] + bubbleRadius,
             bubbleCenterY = bubbleLocation[1] + bubble.height - bubbleRadius,
@@ -328,7 +328,7 @@ class BubbleOverlayService : Service() {
         )
     }
 
-    /** Chiude il widget senza aprire l'app; in ascolto annulla prima la cattura. */
+    /** Closes the widget without opening the app; while listening it cancels the capture first. */
     private fun dismissBubble() {
         if (!BubbleDismissPolicy.mustCancelCapture(state.phase)) {
             stopSelf()
@@ -372,7 +372,7 @@ class BubbleOverlayService : Service() {
         startActivity(MediaProjectionConsentActivity.createIntent(this, targetUid))
     }
 
-    /** In registrazione ferma ed elabora; in ascolto annulla senza produrre nulla. */
+    /** While recording it stops and processes; while listening it cancels without producing anything. */
     private fun requestCaptureStop() {
         transition {
             BubbleOverlayTransitions.requestStop(it) ?: BubbleOverlayTransitions.cancelListening(it)
@@ -415,7 +415,7 @@ class BubbleOverlayService : Service() {
     private fun transition(update: (BubbleOverlayState) -> BubbleOverlayState?) {
         val next = update(state) ?: return
         state = next
-        // Anche l'ascolto è una cattura attiva: le altre schermate devono poterla fermare.
+        // Listening is an active capture too: other screens must be able to stop it.
         CaptureOverlayStatus.update(
             next.phase == BubbleOverlayPhase.LISTENING || next.phase == BubbleOverlayPhase.RECORDING
         )

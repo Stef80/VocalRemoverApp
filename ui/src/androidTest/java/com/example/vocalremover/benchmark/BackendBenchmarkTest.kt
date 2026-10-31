@@ -18,14 +18,14 @@ import java.io.File
 import java.util.Locale
 
 /**
- * Misura tempi e correttezza del backend del flavor installato sul dispositivo corrente.
+ * Measures timings and correctness of the installed flavor's backend on the current device.
  *
- * L'uscita viene confrontata con quella del CPU EP (riferimento di qualità) calcolata nello
- * stesso processo: un backend che produce audio rovinato (come WebGPU su Realme RMX3301)
- * fa fallire il test anche se non va in crash.
+ * The output is compared with that of the CPU EP (quality reference) computed in the
+ * same process: a backend that produces ruined audio (like WebGPU on Realme RMX3301)
+ * fails the test even if it does not crash.
  *
- * Argomenti opzionali (`-e nome valore`): durationSec (default 20), minSnrDb (default 20).
- * Risultato: riga logcat con tag VRBenchmark e file
+ * Optional arguments (`-e name value`): durationSec (default 20), minSnrDb (default 20).
+ * Result: logcat line with tag VRBenchmark and file
  * /sdcard/Android/data/<applicationId>/files/benchmark/report-<backend>.json
  */
 @RunWith(AndroidJUnit4::class)
@@ -69,13 +69,13 @@ class BackendBenchmarkTest {
             }
             when {
                 !BenchmarkMetrics.allFinite(out.left) || !BenchmarkMetrics.allFinite(out.right) ->
-                    "uscita con NaN/Inf"
+                    "output with NaN/Inf"
                 outRms < MIN_OUTPUT_RMS -> "uscita silenziosa (rms=$outRms)"
                 snr < minSnrDb -> "SNR rispetto alla CPU troppo basso: ${String.format(Locale.ROOT, "%.1f", snr)} dB < $minSnrDb dB"
                 else -> null
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Benchmark fallito", e)
+            Log.e(TAG, "Benchmark failed", e)
             "${e.javaClass.simpleName}: ${e.message}"
         }
 
@@ -99,7 +99,7 @@ class BackendBenchmarkTest {
         context.getExternalFilesDir(null)?.let { dir ->
             File(dir, "benchmark").apply { mkdirs() }.resolve("report-${backend.id}.json").writeText(json + "\n")
         }
-        // Passata da Gradle (connected*AndroidTest), che la copia in build/outputs prima di disinstallare.
+        // Passed by Gradle (connected*AndroidTest), which copies it to build/outputs before uninstalling.
         args.getString("additionalTestOutputDir")?.let { dir ->
             File(dir).apply { mkdirs() }.resolve("report-${backend.id}.json").writeText(json + "\n")
         }

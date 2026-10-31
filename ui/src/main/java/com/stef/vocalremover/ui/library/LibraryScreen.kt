@@ -60,8 +60,8 @@ import com.stef.vocalremover.ui.previewLibraryTracks
 import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 
 /**
- * Schermata principale: i brani elaborati pronti per la riproduzione e, sotto, il pulsante per
- * importarne uno nuovo. La lista si rilegge a ogni ritorno in primo piano (es. dopo un'elaborazione).
+ * Main screen: the processed tracks ready to play and, below, the button to
+ * import a new one. The list is read again every time the app comes back to the foreground (e.g. after processing).
  */
 @Composable
 fun LibraryRoute(
@@ -94,8 +94,8 @@ fun LibraryRoute(
         }
     }
     LifecycleResumeEffect(viewModel) {
-        // Al ritorno dalle impostazioni il permesso può essere cambiato. Scatta anche a ogni ritorno
-        // sulla scheda Libreria dal footer: voluto, così compaiono subito i brani appena elaborati.
+        // When coming back from settings the permission may have changed. It also fires on every return
+        // to the Library tab from the footer: intended, so newly processed tracks show up right away.
         permission.recheck()
         viewModel.refresh()
         onPauseOrDispose { }
@@ -124,7 +124,7 @@ fun LibraryScreen(
     bottomBar: @Composable () -> Unit = {},
 ) {
     val tracks = (state as? LibraryUiState.Tracks)?.tracks.orEmpty()
-    // Per Uri, così le finestre sopravvivono alla rotazione e si chiudono se il brano sparisce.
+    // Per Uri, so dialogs survive rotation and close if the track disappears.
     var renameUri by rememberSaveable { mutableStateOf<String?>(null) }
     var deleteUri by rememberSaveable { mutableStateOf<String?>(null) }
     val renameTarget = tracks.firstOrNull { it.uri.toString() == renameUri }
@@ -264,7 +264,7 @@ private fun DeleteDialog(track: LibraryTrack, onConfirm: () -> Unit, onDismiss: 
     )
 }
 
-/** Senza permesso la lista mostra solo i brani creati da questa installazione dell'app. */
+/** Without permission the list shows only the tracks created by this install of the app. */
 @Composable
 private fun PermissionRequestCard(onGrantPermission: () -> Unit) {
     Card(

@@ -23,8 +23,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Riproduce i WAV salvati nella libreria (Music/VocalRemover) con ExoPlayer.
- * Si costruisce e si usa solo dal main thread, come richiede ExoPlayer.
+ * Plays the WAVs saved in the library (Music/VocalRemover) with ExoPlayer.
+ * It is built and used only from the main thread, as ExoPlayer requires.
  */
 class LibraryPlayer(context: Context) {
 
@@ -44,7 +44,7 @@ class LibraryPlayer(context: Context) {
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _state.update { it.copy(isPlaying = isPlaying, positionMs = currentPositionMs()) }
-            // ExoPlayer non notifica la posizione: la si legge periodicamente solo mentre suona.
+            // ExoPlayer does not report the position: it is read periodically only while playing.
             positionJob?.cancel()
             positionJob = if (isPlaying) scope.launch {
                 while (isActive) {
@@ -80,13 +80,13 @@ class LibraryPlayer(context: Context) {
                     .build(),
                 /* handleAudioFocus = */ true
             )
-            // Pausa quando si staccano le cuffie.
+            // Pause when headphones are unplugged.
             .setHandleAudioBecomingNoisy(true)
             .build()
         player.addListener(listener)
     }
 
-    /** Brano diverso (o in errore): carica e suona. Stesso brano: riprende, da 0 se era finito. */
+    /** Different track (or in error): load and play. Same track: resume, from 0 if it had ended. */
     fun play(uri: Uri) {
         checkUsable()
         if (uri != _state.value.currentUri || player.playbackState == Player.STATE_IDLE) {
@@ -107,15 +107,15 @@ class LibraryPlayer(context: Context) {
         _state.update { it.copy(positionMs = currentPositionMs()) }
     }
 
-    /** Ferma e scarica il brano: il prossimo play() lo ricarica anche se l'Uri è lo stesso
-     *  (es. file riscritto con lo stesso nome). */
+    /** Stops and unloads the track: the next play() reloads it even if the Uri is the same
+     *  (e.g. file rewritten with the same name). */
     fun stop() {
         checkUsable()
         player.stop()
         _state.update { it.copy(isPlaying = false, positionMs = 0) }
     }
 
-    /** Limitata a [0, durata]; finché la durata non è nota si limita solo in basso. */
+    /** Clamped to [0, duration]; until the duration is known only the lower bound applies. */
     fun seekTo(positionMs: Long) {
         checkUsable()
         val duration = knownDurationMs()
@@ -125,7 +125,7 @@ class LibraryPlayer(context: Context) {
         _state.update { it.copy(positionMs = target) }
     }
 
-    /** Idempotente. Dopo il rilascio ogni altro metodo lancia IllegalStateException. */
+    /** Idempotent. After release every other method throws IllegalStateException. */
     fun release() {
         checkMainThread()
         if (released) return
@@ -143,10 +143,10 @@ class LibraryPlayer(context: Context) {
 
     private fun checkUsable() {
         checkMainThread()
-        check(!released) { "LibraryPlayer già rilasciato" }
+        check(!released) { "LibraryPlayer already released" }
     }
 
     private fun checkMainThread() {
-        check(Looper.myLooper() == Looper.getMainLooper()) { "LibraryPlayer va usato dal main thread" }
+        check(Looper.myLooper() == Looper.getMainLooper()) { "LibraryPlayer must be used from the main thread" }
     }
 }

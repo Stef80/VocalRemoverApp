@@ -6,11 +6,11 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Trasformata di Fourier discreta (DFT/IDFT) per lunghezze arbitrarie (non necessariamente
- * potenze di 2), tramite l'algoritmo di Bluestein (chirp z-transform). Riusa una FFT radix-2
- * interna (potenza di 2) come motore di convoluzione circolare, quindi non richiede alcuna
- * libreria esterna. Fallback di MdxStftProcessor per le lunghezze che MixedRadixFft non
- * supporta (diverse da 5·2^k).
+ * Discrete Fourier transform (DFT/IDFT) for arbitrary lengths (not necessarily
+ * powers of 2), using Bluestein's algorithm (chirp z-transform). Reuses an internal
+ * radix-2 FFT (power of 2) as the circular convolution engine, so it needs no
+ * external library. Fallback of MdxStftProcessor for the lengths MixedRadixFft does not
+ * support (other than 5·2^k).
  */
 object BluesteinFft {
 
@@ -24,11 +24,11 @@ object BluesteinFft {
         val m: Int
         val chirpRe: FloatArray
         val chirpIm: FloatArray
-        // Trasformata precomputata di "b" (chirp coniugato, zero-padded a lunghezza m) per il
-        // caso forward, riutilizzabile per ogni chiamata con lo stesso n.
+        // Precomputed transform of "b" (conjugate chirp, zero-padded to length m) for the
+        // forward case, reusable for every call with the same n.
         val bFftReForward: FloatArray
         val bFftImForward: FloatArray
-        // Idem per il caso inverse (chirp con segno opposto).
+        // Same for the inverse case (chirp with the opposite sign).
         val bFftReInverse: FloatArray
         val bFftImInverse: FloatArray
 
@@ -40,16 +40,16 @@ object BluesteinFft {
             chirpRe = FloatArray(n)
             chirpIm = FloatArray(n)
             for (k in 0 until n) {
-                // angolo = pi * k^2 / n; usiamo k^2 mod (2n) per evitare overflow/perdita di
-                // precisione con k grandi (fino a n=5120 -> k^2 fino a ~26 milioni, ok in Long).
+                // angle = pi * k^2 / n; we use k^2 mod (2n) to avoid overflow/loss of
+                // precision with large k (up to n=5120 -> k^2 up to ~26 million, fine in Long).
                 val kk = (k.toLong() * k.toLong()) % (2L * n)
                 val angle = PI * kk / n
                 chirpRe[k] = cos(angle).toFloat()
                 chirpIm[k] = sin(angle).toFloat()
             }
 
-            // Forward: "a" usa exp(-i*pi*k^2/n), quindi "b" (per la convoluzione circolare
-            // a*b) deve usare il segno OPPOSTO: exp(+i*pi*m^2/n).
+            // Forward: "a" uses exp(-i*pi*k^2/n), so "b" (for the circular convolution
+            // a*b) must use the OPPOSITE sign: exp(+i*pi*m^2/n).
             val bReF = FloatArray(m)
             val bImF = FloatArray(m)
             bReF[0] = chirpRe[0]
@@ -64,7 +64,7 @@ object BluesteinFft {
             bFftImForward = bImF
             radix2Fft(bFftReForward, bFftImForward, inverse = false)
 
-            // Inverse: "a" usa exp(+i*pi*k^2/n), quindi "b" deve usare il segno opposto:
+            // Inverse: "a" uses exp(+i*pi*k^2/n), so "b" must use the opposite sign:
             // exp(-i*pi*m^2/n).
             val bReI = FloatArray(m)
             val bImI = FloatArray(m)
@@ -99,9 +99,9 @@ object BluesteinFft {
     }
 
     /**
-     * DFT (o IDFT se [inverse]=true) in-place di lunghezza arbitraria [re].size.
-     * Per lunghezze potenza di 2 delega direttamente alla FFT radix-2 (più veloce, nessun
-     * overhead di zero-padding). Per le altre lunghezze usa Bluestein.
+     * In-place DFT (or IDFT if [inverse]=true) of arbitrary length [re].size.
+     * For power-of-2 lengths it delegates directly to the radix-2 FFT (faster, no
+     * zero-padding overhead). For other lengths it uses Bluestein.
      */
     fun transform(
         re: FloatArray,
@@ -121,7 +121,7 @@ object BluesteinFft {
         val scratch = workspace ?: workspaceFor(n)
         require(scratch.size == n) { "Il workspace FFT deve avere dimensione $n" }
 
-        // a[k] = x[k] * exp(sign * i * pi * k^2 / n), zero-padded a lunghezza m.
+        // a[k] = x[k] * exp(sign * i * pi * k^2 / n), zero-padded to length m.
         // forward: sign=-1 -> conj(chirp) = (chirpRe, -chirpIm)
         // inverse: sign=+1 -> chirp = (chirpRe, chirpIm)
         val aRe = scratch.re
@@ -140,7 +140,7 @@ object BluesteinFft {
         val bRe = if (inverse) plan.bFftReInverse else plan.bFftReForward
         val bIm = if (inverse) plan.bFftImInverse else plan.bFftImForward
 
-        // Convoluzione circolare nel dominio della frequenza.
+        // Circular convolution in the frequency domain.
         for (i in 0 until plan.m) {
             val pr = aRe[i] * bRe[i] - aIm[i] * bIm[i]
             val pi = aRe[i] * bIm[i] + aIm[i] * bRe[i]
@@ -167,7 +167,7 @@ object BluesteinFft {
         }
     }
 
-    /** FFT radix-2 Cooley-Tukey standard (richiede lunghezza potenza di 2), in-place. */
+    /** Standard Cooley-Tukey radix-2 FFT (requires a power-of-2 length), in-place. */
     private fun radix2Fft(re: FloatArray, im: FloatArray, inverse: Boolean) {
         val n = re.size
         var j = 0

@@ -2,7 +2,7 @@ package com.example.vocalremover.capture
 
 import android.content.Context
 
-/** Modifiche dell'utente a una cattura in attesa, legate all'id del suo risultato terminale. */
+/** User edits to a pending capture, tied to the id of its terminal result. */
 internal data class CaptureDraft(
     val captureId: String,
     val displayName: String,
@@ -12,8 +12,8 @@ internal data class CaptureDraft(
 )
 
 /**
- * Bozza dell'editor di taglio. Separata da [CaptureTerminalResultStore], che resta la fonte del
- * WAV originale e delle fasi di elaborazione.
+ * Trim editor draft. Separate from [CaptureTerminalResultStore], which remains the source of the
+ * original WAV and of the processing stages.
  */
 internal class CaptureDraftStore(context: Context) {
     companion object {
@@ -30,7 +30,7 @@ internal class CaptureDraftStore(context: Context) {
         Context.MODE_PRIVATE
     )
 
-    /** La bozza di [captureId]; una bozza di un'altra cattura viene cancellata. */
+    /** The draft of [captureId]; a draft of another capture is deleted. */
     fun read(captureId: String): CaptureDraft? {
         val storedId = preferences.getString(KEY_CAPTURE_ID, null) ?: return null
         val displayName = preferences.getString(KEY_DISPLAY_NAME, null)
@@ -56,7 +56,7 @@ internal class CaptureDraftStore(context: Context) {
                 .putLong(KEY_TRIM_START_MS, draft.trimStartMs)
                 .putLong(KEY_TRIM_END_MS, draft.trimEndMs)
                 .commit()
-        ) { "Impossibile salvare la bozza della cattura" }
+        ) { "Cannot save the capture draft" }
     }
 
     fun clear() {

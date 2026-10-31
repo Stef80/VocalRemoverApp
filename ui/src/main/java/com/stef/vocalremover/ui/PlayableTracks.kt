@@ -45,8 +45,8 @@ import com.example.vocalremover.ui.R
 import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 
 /**
- * Brani elaborati pronti per la riproduzione: tocco → [onTrackClick], tocco lungo → menu con
- * Rinomina ed Elimina.
+ * Processed tracks ready to play: tap → [onTrackClick], long press → menu with
+ * Rename and Delete.
  */
 @Composable
 fun PlayableTracks(
@@ -159,7 +159,7 @@ private fun PlayableTrackContent(track: LibraryTrack) {
             color = MaterialTheme.colorScheme.primaryContainer
         ) {
             Box(contentAlignment = Alignment.Center) {
-                // Decorativa: l'azione è sull'intera card.
+                // Decorative: the action is on the whole card.
                 Icon(
                     painter = painterResource(R.drawable.ic_play),
                     contentDescription = null,

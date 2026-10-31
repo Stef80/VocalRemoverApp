@@ -5,10 +5,10 @@ import kotlin.math.sqrt
 
 object BenchmarkMetrics {
 
-    /** Rapporto segnale/errore (dB) di [out] rispetto a [ref]; +∞ se identici. */
+    /** Signal-to-error ratio (dB) of [out] against [ref]; +∞ if identical. */
     fun snrDb(ref: FloatArray, out: FloatArray): Double = stereoSnrDb(ref, FloatArray(0), out, FloatArray(0))
 
-    /** Come [snrDb] ma sommando energia ed errore dei due canali. */
+    /** Like [snrDb] but summing energy and error of both channels. */
     fun stereoSnrDb(refL: FloatArray, refR: FloatArray, outL: FloatArray, outR: FloatArray): Double {
         require(refL.size == outL.size && refR.size == outR.size) { "Lunghezze diverse" }
         var signal = 0.0

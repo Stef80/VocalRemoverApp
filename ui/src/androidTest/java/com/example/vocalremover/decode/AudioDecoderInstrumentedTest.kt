@@ -13,7 +13,7 @@ import org.junit.runner.RunWith
 import java.io.File
 import kotlin.math.abs
 
-// Nomi dei test senza spazi: D8 li rifiuta nei metodi con minSdk < 30.
+// Test names without spaces: D8 rejects them in methods with minSdk < 30.
 @RunWith(AndroidJUnit4::class)
 class AudioDecoderInstrumentedTest {
 
@@ -50,8 +50,8 @@ class AudioDecoderInstrumentedTest {
 
         val pcm = decoder.decode(Uri.fromFile(file))
 
-        // L'encoder aggiunge il priming (1024–2048 campioni a 22 050 Hz) e MediaMuxer non lo
-        // taglia: in uscita possono esserci fino a ~6000 frame in più a 44,1 kHz.
+        // The encoder adds priming (1024–2048 samples at 22 050 Hz) and MediaMuxer does not
+        // trim it: the output may have up to ~6000 extra frames at 44.1 kHz.
         assertTrue("size=${pcm.size}", pcm.size in (88200 - 2205)..(88200 + 3 * 2048 * 2))
         assertEquals(pcm.left.size, pcm.right.size)
     }

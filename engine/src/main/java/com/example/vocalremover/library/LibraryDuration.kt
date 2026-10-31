@@ -1,17 +1,17 @@
 package com.example.vocalremover.library
 
-/** Durata di un brano della libreria, con ripiego sulla dimensione del file. */
+/** Duration of a library track, falling back to the file size. */
 object LibraryDuration {
 
-    /** Header dei WAV scritti da `WavFileWriter`. */
+    /** Header of the WAVs written by `WavFileWriter`. */
     private const val WAV_HEADER_BYTES = 44L
 
-    /** PCM 16 bit stereo a 44,1 kHz: 44 100 × 2 canali × 2 byte. */
+    /** 16-bit stereo PCM at 44.1 kHz: 44 100 × 2 channels × 2 bytes. */
     private const val WAV_BYTES_PER_SECOND = 176_400L
 
     /**
-     * La durata di MediaStore se positiva; altrimenti (file appena pubblicato, non ancora analizzato)
-     * la si ricava dalla dimensione. 0 = sconosciuta.
+     * The MediaStore duration if positive; otherwise (file just published, not yet scanned)
+     * it is derived from the size. 0 = unknown.
      */
     fun resolve(durationMs: Long?, sizeBytes: Long?): Long = when {
         durationMs != null && durationMs > 0 -> durationMs

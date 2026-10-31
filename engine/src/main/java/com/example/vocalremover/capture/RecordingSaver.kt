@@ -12,7 +12,7 @@ import java.nio.ByteOrder
 
 object RecordingSaver {
     private const val TAG = "RecordingSaver"
-    /** Cartella dei brani elaborati: la legge anche `MediaStoreLibraryRepository`. */
+    /** Folder of processed tracks: `MediaStoreLibraryRepository` reads it too. */
     internal const val BASE_RELATIVE_PATH = "Music/VocalRemover"
     private const val RAW_RELATIVE_PATH = "$BASE_RELATIVE_PATH/raw"
 
@@ -24,7 +24,7 @@ object RecordingSaver {
         val resolver = context.contentResolver
         Log.i(
             TAG,
-            "Avvio salvataggio WAV elaborato: name=$displayName frames=${stereoPcm.size}"
+            "Saving processed WAV started: name=$displayName frames=${stereoPcm.size}"
         )
         val uri = resolver.insert(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -34,7 +34,7 @@ object RecordingSaver {
                 put(MediaStore.MediaColumns.RELATIVE_PATH, BASE_RELATIVE_PATH)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
-        ) ?: throw IOException("Impossibile creare il file WAV in MediaStore")
+        ) ?: throw IOException("Cannot create the WAV file in MediaStore")
         try {
             resolver.openOutputStream(uri, "w")?.use { output ->
                 WavPcm16ProcessedSerializer.writeTo(output, stereoPcm.left, stereoPcm.right)
@@ -52,10 +52,10 @@ object RecordingSaver {
                 throw IOException("Impossibile pubblicare il file WAV in MediaStore")
             }
 
-            Log.i(TAG, "Salvataggio WAV elaborato completato: uri=$uri")
+            Log.i(TAG, "Processed WAV save completed: uri=$uri")
             return uri
         } catch (failure: Throwable) {
-            Log.e(TAG, "Salvataggio WAV elaborato fallito: uri=$uri", failure)
+            Log.e(TAG, "Processed WAV save failed: uri=$uri", failure)
             deleteIncompleteEntry(resolver, uri, failure)
             throw failure
         }
@@ -69,7 +69,7 @@ object RecordingSaver {
         val resolver = context.contentResolver
         Log.i(
             TAG,
-            "Avvio salvataggio WAV raw: name=$displayName frames=${stereoPcm.size}"
+            "Saving raw WAV started: name=$displayName frames=${stereoPcm.size}"
         )
         val uri = resolver.insert(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -97,10 +97,10 @@ object RecordingSaver {
                 throw IOException("Impossibile pubblicare il file WAV raw in MediaStore")
             }
 
-            Log.i(TAG, "Salvataggio WAV raw completato: uri=$uri")
+            Log.i(TAG, "Raw WAV save completed: uri=$uri")
             return uri
         } catch (failure: Throwable) {
-            Log.e(TAG, "Salvataggio WAV raw fallito: uri=$uri", failure)
+            Log.e(TAG, "Raw WAV save failed: uri=$uri", failure)
             deleteIncompleteEntry(resolver, uri, failure)
             throw failure
         }
@@ -135,7 +135,7 @@ internal object WavPcm16StereoSerializer {
 
         val dataSize = left.size.toLong() * CHANNEL_COUNT * BYTES_PER_SAMPLE
         require(dataSize <= Int.MAX_VALUE - HEADER_SIZE) {
-            "Audio PCM troppo grande per essere serializzato come WAV stereo"
+            "PCM audio too large to be serialized as stereo WAV"
         }
 
         val buffer = ByteBuffer.allocate(HEADER_SIZE + dataSize.toInt())
@@ -169,7 +169,7 @@ internal object WavPcm16StereoSerializer {
 
         val dataSize = left.size.toLong() * CHANNEL_COUNT * BYTES_PER_SAMPLE
         require(dataSize <= UInt.MAX_VALUE.toLong()) {
-            "Audio PCM troppo grande per essere serializzato come WAV stereo"
+            "PCM audio too large to be serialized as stereo WAV"
         }
 
         output.write(

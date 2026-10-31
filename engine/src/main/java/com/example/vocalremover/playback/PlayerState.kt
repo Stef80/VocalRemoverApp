@@ -3,19 +3,19 @@ package com.example.vocalremover.playback
 import android.net.Uri
 import androidx.media3.common.PlaybackException
 
-/** Stato di [LibraryPlayer], pensato per essere letto da Compose. */
+/** State of [LibraryPlayer], meant to be read by Compose. */
 data class PlayerState(
     val currentUri: Uri? = null,
     val isPlaying: Boolean = false,
     val positionMs: Long = 0,
-    /** 0 finché ExoPlayer non la conosce. */
+    /** 0 until ExoPlayer knows it. */
     val durationMs: Long = 0,
     val error: PlayerError? = null,
 )
 
-/** Il testo per l'utente lo sceglie `:ui` in strings.xml. */
+/** The user-facing text is chosen by `:ui` in strings.xml. */
 enum class PlayerError {
-    /** File non più presente o non leggibile (es. WAV cancellato dalla cartella). */
+    /** File no longer present or not readable (e.g. WAV deleted from the folder). */
     SOURCE_UNAVAILABLE,
     PLAYBACK_FAILED,
 }

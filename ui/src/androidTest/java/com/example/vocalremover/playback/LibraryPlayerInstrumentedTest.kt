@@ -20,7 +20,7 @@ import org.junit.runner.RunWith
 import java.io.File
 import kotlin.math.abs
 
-// Nomi dei test senza spazi: D8 li rifiuta nei metodi con minSdk < 30.
+// Test names without spaces: D8 rejects them in methods with minSdk < 30.
 @RunWith(AndroidJUnit4::class)
 class LibraryPlayerInstrumentedTest {
 
@@ -48,8 +48,8 @@ class LibraryPlayerInstrumentedTest {
         runBlocking { withTimeout(5_000) { player.state.first(predicate) } }
 
     /**
-     * seekTo scrive subito la posizione richiesta nello stato: per sapere dove suona davvero
-     * si aspetta che il polling (ogni 200 ms) l'abbia sovrascritta con quella di ExoPlayer.
+     * seekTo writes the requested position into the state right away: to know where it really plays
+     * we wait for the polling (every 200 ms) to overwrite it with ExoPlayer's.
      */
     private fun assertPlayingFromAtLeast(minMs: Long) {
         awaitState { it.isPlaying }

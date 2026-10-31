@@ -46,8 +46,8 @@ import kotlin.math.roundToInt
 private val HANDLE_TOUCH_WIDTH = 48.dp
 
 /**
- * Forma d'onda con due maniglie di taglio. Le barre fuori da [startMs, endMs] sono attenuate; la
- * linea verticale è la posizione di riproduzione. Un tocco fuori dalle maniglie sposta l'ascolto.
+ * Waveform with two trim handles. Bars outside [startMs, endMs] are dimmed; the
+ * vertical line is the playback position. A tap outside the handles moves playback.
  */
 @Composable
 fun TrimWaveform(
@@ -132,7 +132,7 @@ fun TrimWaveform(
     }
 }
 
-/** Area di tocco larga 48 dp centrata sulla maniglia, con azioni di accessibilità ±1 s. */
+/** 48 dp wide touch area centered on the handle, with ±1 s accessibility actions. */
 @Composable
 private fun TrimHandleBox(
     handle: TrimHandle,
@@ -145,7 +145,7 @@ private fun TrimHandleBox(
 ) {
     val currentValue by rememberUpdatedState(valueMs)
     val currentOnMove by rememberUpdatedState(onMove)
-    // Posizione non arrotondata durante il trascinamento: il passo da 10 ms non mangia i piccoli spostamenti.
+    // Unrounded position while dragging: the 10 ms step does not swallow small movements.
     val dragMs = remember { mutableFloatStateOf(0f) }
     val touchWidthPx = with(LocalDensity.current) { HANDLE_TOUCH_WIDTH.toPx() }
     val description = stringResource(

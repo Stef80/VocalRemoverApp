@@ -100,7 +100,7 @@ class MixedRadixFftTest {
         MixedRadixFft(5120).transform(re, im)
         BluesteinFft.transform(bRe, bIm)
 
-        // Bluestein (FFT interne da 16384 punti) accumula più errore float: tolleranza relativa 1e-4.
+        // Bluestein (internal 16384-point FFTs) accumulates more float error: relative tolerance 1e-4.
         var maxMag = 0f
         for (i in re.indices) maxMag = maxOf(maxMag, kotlin.math.abs(bRe[i]), kotlin.math.abs(bIm[i]))
         val delta = maxMag * 1e-4f

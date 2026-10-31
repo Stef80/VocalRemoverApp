@@ -49,7 +49,7 @@ class MdxChunkerTest {
             assertEquals("len=$len", calls, small.chunkCount(len))
         }
 
-        // Caso reale dei log: 3.684.352 frame -> 20 chiamate ONNX.
+        // Real case from the logs: 3,684,352 frames -> 20 ONNX calls.
         val model = MdxChunker(nFft = 5120, hopLength = 1024, dimT = 256, overlap = 0.25)
         assertEquals(20, model.chunkCount(3_684_352))
     }

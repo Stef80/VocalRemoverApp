@@ -7,8 +7,8 @@ DST = "engine/src/main/assets/vocal_remover_fp16.onnx"
 m = onnx.load(SRC)
 m16 = float16.convert_float_to_float16(
     m,
-    keep_io_types=True,      # I/O rimangono FP32 (sicuro per il runtime)
+    keep_io_types=True,      # I/O stay FP32 (safe for the runtime)
     disable_shape_infer=False
 )
 onnx.save(m16, DST)
-print("Scritto:", DST)
+print("Written:", DST)

@@ -14,28 +14,28 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.example.vocalremover.ui.R
 import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 
-/** Le schede del footer, nell'ordine in cui compaiono. */
+/** The footer tabs, in the order they appear. */
 enum class AppTab(@param:DrawableRes val icon: Int, @param:StringRes val label: Int) {
     Library(R.drawable.ic_tab_library, R.string.tab_library),
     Capture(R.drawable.ic_tab_capture, R.string.tab_capture),
     Player(R.drawable.ic_tab_player, R.string.tab_player),
 }
 
-/** Regole di navigazione tra le schede, senza Compose per poterle testare in JVM. */
+/** Navigation rules between tabs, without Compose so they can be tested on the JVM. */
 object AppNavigation {
 
-    /** La scheda da mostrare: il Player senza brano (es. dopo la morte del processo) ricade sulla Libreria. */
+    /** The tab to show: the Player without a track (e.g. after process death) falls back to the Library. */
     fun resolve(selected: AppTab, hasTrack: Boolean): AppTab =
         if (selected == AppTab.Player && !hasTrack) AppTab.Library else selected
 
-    /** Tasto Indietro: da Cattura e Player si torna alla Libreria; `null` = dalla Libreria si esce dall'app. */
+    /** Back key: from Capture and Player go back to the Library; `null` = from the Library the app exits. */
     fun back(current: AppTab): AppTab? = if (current == AppTab.Library) null else AppTab.Library
 }
 
-/** Footer comune alle tre schede. Il Player resta disabilitato finché non si apre un brano. */
+/** Footer shared by the three tabs. The Player stays disabled until a track is opened. */
 @Composable
 fun AppBottomBar(selected: AppTab, playerEnabled: Boolean, onSelect: (AppTab) -> Unit) {
-    // Le schermate applicano già safeDrawingPadding: niente inset propri per non contarli due volte.
+    // Screens already apply safeDrawingPadding: no insets of its own, so they are not counted twice.
     NavigationBar(windowInsets = WindowInsets(0)) {
         AppTab.entries.forEach { tab ->
             NavigationBarItem(

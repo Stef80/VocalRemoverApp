@@ -19,12 +19,12 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // Helper del benchmark condivisi con i test JVM di :engine: non finiscono nell'APK dell'app.
+    // Benchmark helpers shared with :engine's JVM tests: they never ship in the app APK.
     sourceSets {
         getByName("androidTest").java.srcDir("../engine/src/benchmarkShared/java")
     }
 
-    // Stessa dimensione/nomi dei flavor di :engine: ogni variante dell'app usa il backend omonimo.
+    // Same dimension/names as :engine's flavors: each app variant uses the backend of the same name.
     flavorDimensions += "backend"
     productFlavors {
         create("cpu") {
@@ -63,15 +63,15 @@ android {
 
     testOptions {
         unitTests.all { test ->
-            // Robolectric scarica android-all (~200 MB) passando da java.io.tmpdir:
-            // su una /tmp piccola finisce lo spazio, quindi si usa una cartella sotto build/.
+            // Robolectric downloads android-all (~200 MB) through java.io.tmpdir:
+            // a small /tmp runs out of space, so a folder under build/ is used.
             val tmp = layout.buildDirectory.dir("tmp/unitTest").get().asFile
             test.doFirst { tmp.mkdirs() }
             test.systemProperty("java.io.tmpdir", tmp.absolutePath)
         }
     }
 
-    // Exclude conflicting native libs (es. tra onnxruntime e altre dipendenze)
+    // Exclude conflicting native libs (e.g. between onnxruntime and other dependencies)
     packaging {
         jniLibs {
             pickFirsts += listOf("**/libc++_shared.so")
@@ -81,7 +81,7 @@ android {
 
 androidComponents {
     onVariants(selector().withFlavor("backend" to "qnn")) { variant ->
-        // QNN: le librerie devono essere estratte su disco perché il DSP carichi le Skel.
+        // QNN: libraries must be extracted to disk so that the DSP can load the Skels.
         variant.packaging.jniLibs.useLegacyPackaging.set(true)
     }
 }
@@ -103,11 +103,11 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
 
     testImplementation("junit:junit:4.13.2")
-    // Solo test: Robolectric per gli Uri di ImportViewModel, coroutines-test per il Main dispatcher
+    // Tests only: Robolectric for ImportViewModel's Uris, coroutines-test for the Main dispatcher
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 
-    // Benchmark su dispositivo (BackendBenchmarkTest): eseguibile in locale o su Firebase Test Lab
+    // On-device benchmark (BackendBenchmarkTest): runnable locally or on Firebase Test Lab
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")

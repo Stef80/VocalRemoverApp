@@ -4,10 +4,10 @@ import kotlin.math.PI
 import kotlin.math.cos
 
 /**
- * STFT/ISTFT "centrata" (reflect-padding) per UVR-MDX-NET-Inst_HQ_5 (nFft=5120).
+ * "Centered" STFT/ISTFT (reflect padding) for UVR-MDX-NET-Inst_HQ_5 (nFft=5120).
  *
- * NOTA: la classe non è thread-safe: riutilizza buffer interni tra chiamate. Tutte le
- * chiamate devono avvenire in serie dallo stesso thread (come nel flusso di VocalRemover).
+ * NOTE: the class is not thread-safe: it reuses internal buffers across calls. All
+ * calls must happen serially from the same thread (as in the VocalRemover flow).
  */
 class MdxStftProcessor(
     val nFft: Int = 5120,
@@ -21,11 +21,11 @@ class MdxStftProcessor(
     }
     private val windowSquareSum: FloatArray = FloatArray(nFft) { window[it] * window[it] }
 
-    /** FFT diretta 5·2^k (nFft=5120); le altre lunghezze ricadono su Bluestein. */
+    /** Direct 5·2^k FFT (nFft=5120); other lengths fall back to Bluestein. */
     private val mixedRadixFft: MixedRadixFft? =
         if (MixedRadixFft.supports(nFft)) MixedRadixFft(nFft) else null
 
-    // --- Scratch riutilizzabili ---------------------------------------------
+    // --- Reusable scratch buffers --------------------------------------------
     private var paddedBuf: FloatArray = FloatArray(0)
     private var paddedBufR: FloatArray = FloatArray(0)
     private var overlapAccR: FloatArray = FloatArray(0)
@@ -36,9 +36,9 @@ class MdxStftProcessor(
     private var overlapAcc: FloatArray = FloatArray(0)
 
     /**
-     * normSum dell'ISTFT è costante per un dato numero di frame (dipende solo da
-     * hopLength/nFft/frames). Cachata: nel caso reale frames = dimT = 256 sempre,
-     * quindi viene calcolata UNA sola volta per tutta la sessione.
+     * The ISTFT normSum is constant for a given number of frames (it depends only on
+     * hopLength/nFft/frames). Cached: in practice frames = dimT = 256 always,
+     * so it is computed ONCE for the whole session.
      */
     private val normSumCache = HashMap<Int, FloatArray>()
 
@@ -46,7 +46,7 @@ class MdxStftProcessor(
 
     // ---------- STFT (forward) ----------
 
-    /** Wrapper allocante per compatibilità con il codice esistente. */
+    /** Allocating wrapper for compatibility with existing code. */
     fun forward(signal: FloatArray): Pair<FloatArray, FloatArray> {
         val outRe = FloatArray(frameCountFor(signal.size) * dimF)
         val outIm = FloatArray(outRe.size)
@@ -55,8 +55,8 @@ class MdxStftProcessor(
     }
 
     /**
-     * Variante zero-alloc: scrive in [outRe]/[outIm] già dimensionati a
-     * `frameCountFor(signal.size) * dimF`. Riusa paddedBuf/fftRe/fftIm tra chiamate.
+     * Zero-alloc variant: writes into [outRe]/[outIm], already sized to
+     * `frameCountFor(signal.size) * dimF`. Reuses paddedBuf/fftRe/fftIm across calls.
      */
     fun forwardInto(signal: FloatArray, outRe: FloatArray, outIm: FloatArray) {
         val half = nFft / 2
@@ -73,14 +73,14 @@ class MdxStftProcessor(
 
         for (frame in 0 until frames) {
             val start = frame * hopLength
-            // Unico loop di multiply: `im[i] = 0f` è obbligatorio perché Bluestein legge
-            // l'immaginario in input.
+            // Single multiply loop: `im[i] = 0f` is required because Bluestein reads
+            // the input imaginary part.
             for (i in 0 until nFft) {
                 re[i] = padded[start + i] * win[i]
                 im[i] = 0f
             }
             fft(re, im, inverse = false)
-            // Copia bulk contigua invece del loop per bin.
+            // Contiguous bulk copy instead of the per-bin loop.
             val dst = frame * dF
             System.arraycopy(re, 0, outRe, dst, dF)
             System.arraycopy(im, 0, outIm, dst, dF)
@@ -89,7 +89,7 @@ class MdxStftProcessor(
 
     // ---------- ISTFT (inverse) ----------
 
-    /** Wrapper allocante per compatibilità. */
+    /** Allocating wrapper for compatibility. */
     fun inverse(re: FloatArray, im: FloatArray, frames: Int, outputLength: Int): FloatArray {
         val out = FloatArray(outputLength)
         inverseInto(re, im, frames, outputLength, out)
@@ -97,8 +97,8 @@ class MdxStftProcessor(
     }
 
     /**
-     * Variante zero-alloc: scrive in [out] (già dimensionato a [outputLength]).
-     * [re]/[im] sono piatti [frames * freqBins] (devono arrivare fino a freqBins).
+     * Zero-alloc variant: writes into [out] (already sized to [outputLength]).
+     * [re]/[im] are flat [frames * freqBins] (they must reach freqBins).
      */
     fun inverseInto(
         re: FloatArray,
@@ -122,7 +122,7 @@ class MdxStftProcessor(
             System.arraycopy(re, offset, fr, 0, fBins)
             System.arraycopy(im, offset, fi, 0, fBins)
 
-            // Simmetria hermitiana per le frequenze da freqBins a nFft-1.
+            // Hermitian symmetry for the frequencies from freqBins to nFft-1.
             for (k in fBins until nF) {
                 fr[k] = fr[nF - k]
                 fi[k] = -fi[nF - k]
@@ -138,11 +138,11 @@ class MdxStftProcessor(
         normalizeAndTrim(acc, frames, outputLength, out)
     }
 
-    // ---------- STFT/ISTFT stereo (due canali reali in una sola FFT complessa) ----------
+    // ---------- Stereo STFT/ISTFT (two real channels in a single complex FFT) ----------
 
     /**
-     * STFT di [left] e [right] con una sola FFT complessa per frame: z = L + i·R, poi
-     * separazione tramite simmetria hermitiana. Risultato identico a due [forwardInto].
+     * STFT of [left] and [right] with a single complex FFT per frame: z = L + i·R, then
+     * separation via Hermitian symmetry. Result identical to two [forwardInto] calls.
      */
     fun forwardStereoInto(
         left: FloatArray,
@@ -152,7 +152,7 @@ class MdxStftProcessor(
         outRRe: FloatArray,
         outRIm: FloatArray
     ) {
-        require(left.size == right.size) { "I canali stereo devono avere la stessa lunghezza" }
+        require(left.size == right.size) { "Stereo channels must have the same length" }
         val half = nFft / 2
         val paddedLen = left.size + 2 * half
         ensurePadded(paddedLen)
@@ -192,8 +192,8 @@ class MdxStftProcessor(
     }
 
     /**
-     * ISTFT di due canali con una sola IFFT complessa per frame: Z = X_L + i·X_R (spettri
-     * resi hermitiani), quindi Re → L, Im → R. Risultato identico a due [inverseInto].
+     * ISTFT of two channels with a single complex IFFT per frame: Z = X_L + i·X_R (spectra
+     * made Hermitian), then Re → L, Im → R. Result identical to two [inverseInto] calls.
      */
     fun inverseStereoInto(
         lRe: FloatArray,
@@ -205,7 +205,7 @@ class MdxStftProcessor(
         outL: FloatArray,
         outR: FloatArray
     ) {
-        require(nFft % 2 == 0) { "inverseStereoInto richiede nFft pari" }
+        require(nFft % 2 == 0) { "inverseStereoInto requires an even nFft" }
         val paddedLen = (frames - 1) * hopLength + nFft
         ensureOverlapAcc(paddedLen)
         if (overlapAccR.size < paddedLen) {
@@ -225,7 +225,7 @@ class MdxStftProcessor(
 
         for (frame in 0 until frames) {
             val o = frame * fBins
-            // DC e Nyquist: l'inverse per canale scarta la parte immaginaria (prende Re(IFFT)).
+            // DC and Nyquist: the per-channel inverse discards the imaginary part (takes Re(IFFT)).
             zr[0] = lRe[o]; zi[0] = rRe[o]
             zr[h] = lRe[o + h]; zi[h] = rRe[o + h]
             for (k in 1 until h) {
@@ -258,15 +258,15 @@ class MdxStftProcessor(
     private fun normalizeAndTrim(acc: FloatArray, frames: Int, outputLength: Int, out: FloatArray) {
         val paddedLen = (frames - 1) * hopLength + nFft
         val nF = nFft
-        // Normalizzazione: usa la normSum cachata. Equivalente all'originale ma
-        // senza accumulare windowSquareSum per ogni frame ad ogni chiamata.
+        // Normalization: uses the cached normSum. Equivalent to the original but
+        // without accumulating windowSquareSum for every frame on every call.
         val normSum = getNormSum(frames)
         for (i in 0 until paddedLen) {
             val d = normSum[i]
             if (d > 1e-8f) acc[i] /= d
         }
 
-        // Trim del reflect-padding (nFft/2 per lato), copia bulk.
+        // Trim of the reflect padding (nFft/2 per side), bulk copy.
         val half = nF / 2
         val available = paddedLen - half
         val copyLen = if (outputLength <= available) outputLength else available

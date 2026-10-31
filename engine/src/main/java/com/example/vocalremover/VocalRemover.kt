@@ -24,7 +24,7 @@ data class StereoPcm(
     val right: FloatArray
 ) {
     init {
-        require(left.size == right.size) { "I canali stereo devono avere la stessa lunghezza" }
+        require(left.size == right.size) { "Stereo channels must have the same length" }
     }
 
     val size: Int
@@ -41,7 +41,7 @@ class VocalRemover(
     companion object {
         private const val TAG = "VocalRemover"
         private const val MODEL_ASSET = "vocal_remover_fp32.onnx"
-        /** Prefisso della copia in cache; il suffisso è la chiave di installazione. */
+        /** Prefix of the cached copy; the suffix is the install key. */
         private const val MODEL_CACHE_PREFIX = "vocal_remover_fp32"
         private const val N_FFT = 5120
         private const val HOP_LENGTH = 1024
@@ -50,12 +50,12 @@ class VocalRemover(
         private const val OVERLAP = 0.25
         private const val NORMALIZATION_PEAK = 0.9f
 
-        /** Lato blocco per trasposizioni cache-friendly: 32×32 float = 4 KB, sta in L1. */
+        /** Block side for cache-friendly transposes: 32×32 floats = 4 KB, fits in L1. */
         private const val TRANSPOSE_BLOCK = 32
 
         /**
-         * Copia atomica: scrive su un file temporaneo e lo rinomina solo a copia completa,
-         * così un processo ucciso a metà non lascia un modello troncato al posto di quello buono.
+         * Atomic copy: writes to a temporary file and renames it only once the copy is complete,
+         * so a process killed halfway does not leave a truncated model in place of the good one.
          */
         fun copyAssetStreamToFile(input: InputStream, outputFile: File) {
             val tmpFile = File(outputFile.path + ".tmp")
@@ -69,14 +69,14 @@ class VocalRemover(
                     }
                 }
                 if (!tmpFile.renameTo(outputFile)) {
-                    throw IOException("Impossibile rinominare ${tmpFile.name} in ${outputFile.name}")
+                    throw IOException("Cannot rename ${tmpFile.name} to ${outputFile.name}")
                 }
             } finally {
                 tmpFile.delete()
             }
         }
 
-        /** Picco assoluto su due canali in un'unica passata, senza chiamate di funzione per campione. */
+        /** Absolute peak over two channels in a single pass, without per-sample function calls. */
         private fun peakOf(l: FloatArray, r: FloatArray): Float {
             var peak = 0f
             for (i in l.indices) {
@@ -99,13 +99,13 @@ class VocalRemover(
     @Volatile private var closed = false
 
     /**
-     * Sessione creata al primo uso, fuori dal thread UI: con QNN la prima compilazione
-     * del grafo HTP richiede decine di secondi e bloccherebbe onCreate (ANR).
+     * Session created on first use, off the UI thread: with QNN the first compilation
+     * of the HTP graph takes tens of seconds and would block onCreate (ANR).
      */
     private val loaded: Loaded
         get() = loadedRef.get() ?: synchronized(loadLock) {
             loadedRef.get() ?: run {
-                check(!closed) { "VocalRemover già chiuso" }
+                check(!closed) { "VocalRemover already closed" }
                 val session = createSession(appContext)
                 val created = Loaded(
                     session,
@@ -113,12 +113,12 @@ class VocalRemover(
                     session.outputNames.iterator().next()
                 )
                 loadedRef.set(created)
-                // close() concorrente durante la compilazione: chiude chi arriva per secondo,
-                // ma mai sotto una run già partita (altro thread che ha letto loadedRef).
+                // Concurrent close() during compilation: whoever comes second closes it,
+                // but never under a run already started (another thread that read loadedRef).
                 synchronized(runLock) {
                     if (closed) {
                         if (runsInFlight == 0) loadedRef.getAndSet(null)?.session?.close()
-                        error("VocalRemover chiuso durante la creazione della sessione")
+                        error("VocalRemover closed while creating the session")
                     }
                 }
                 created
@@ -126,18 +126,18 @@ class VocalRemover(
         }
 
     /**
-     * Coordina session.run e close(): close() non libera la sessione nativa sotto
-     * un'inferenza in corso (crash nativo), ma la lascia chiudere all'ultima run che termina.
-     * Così close() non blocca il thread UI per la durata di un chunk (secondi su CPU).
+     * Coordinates session.run and close(): close() does not free the native session under
+     * a running inference (native crash), but lets the last run that finishes close it.
+     * This way close() does not block the UI thread for the length of a chunk (seconds on CPU).
      */
     private val runLock = Any()
     private val inferenceMutex = Mutex()
-    private var runsInFlight = 0  // protetto da runLock
+    private var runsInFlight = 0  // guarded by runLock
 
     private inline fun <T> withSession(block: (Loaded) -> T): T {
         val model = loaded
         synchronized(runLock) {
-            check(!closed && loadedRef.get() === model) { "VocalRemover già chiuso" }
+            check(!closed && loadedRef.get() === model) { "VocalRemover already closed" }
             runsInFlight++
         }
         try {
@@ -150,15 +150,15 @@ class VocalRemover(
         }
     }
 
-    /** Mappa riutilizzata tra chunk per evitare una HashMap per iterazione. */
+    /** Map reused across chunks to avoid one HashMap per iteration. */
     private val inputMap = HashMap<String, OnnxTensor>(1)
     private val outputMap = HashMap<String, OnnxTensor>(1)
 
     private class ModelWorkspace(env: OrtEnvironment, freqBins: Int, chunkSize: Int) : AutoCloseable {
         private val shape = longArrayOf(1L, 4L, DIM_F.toLong(), DIM_T.toLong())
 
-        // Tensori I/O ONNX su buffer diretti creati una volta sola: ORT legge/scrive direttamente
-        // in questa memoria, senza copiare 10 MB (e generare garbage) a ogni chunk.
+        // ONNX I/O tensors on direct buffers created only once: ORT reads/writes directly
+        // in this memory, without copying 10 MB (and creating garbage) on every chunk.
         val inputData    = FloatArray(4 * DIM_F * DIM_T)
         val inputBuffer: FloatBuffer = directFloatBuffer(inputData.size)
         val inputTensor: OnnxTensor = OnnxTensor.createTensor(env, inputBuffer, shape)
@@ -166,19 +166,19 @@ class VocalRemover(
         val outputBuffer: FloatBuffer = directFloatBuffer(outputData.size)
         val outputTensor: OnnxTensor = OnnxTensor.createTensor(env, outputBuffer, shape)
 
-        // Uscita STFT forward per L e R (serve tenerle entrambe prima di scrivere su inputData)
+        // Forward STFT output for L and R (both must be kept before writing to inputData)
         val fwdLRe = FloatArray(DIM_T * DIM_F)
         val fwdLIm = FloatArray(DIM_T * DIM_F)
         val fwdRRe = FloatArray(DIM_T * DIM_F)
         val fwdRIm = FloatArray(DIM_T * DIM_F)
 
-        // Spettri riempiti da ONNX → letti da inverseStereoInto
+        // Spectra filled by ONNX → read by inverseStereoInto
         val spectrumLRe = FloatArray(DIM_T * freqBins)
         val spectrumLIm = FloatArray(DIM_T * freqBins)
         val spectrumRRe = FloatArray(DIM_T * freqBins)
         val spectrumRIm = FloatArray(DIM_T * freqBins)
 
-        // Output ISTFT riutilizzati: NON allocare mai più nel loop
+        // Reused ISTFT outputs: NEVER allocate again in the loop
         val chunkOutL = FloatArray(chunkSize)
         val chunkOutR = FloatArray(chunkSize)
 
@@ -191,7 +191,7 @@ class VocalRemover(
             ByteBuffer.allocateDirect(size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
     }
 
-    /** Prepara la sessione in anticipo; va chiamato da un thread in background. */
+    /** Prepares the session ahead of time; must be called from a background thread. */
     fun warmUp() {
         loaded
     }
@@ -200,14 +200,14 @@ class VocalRemover(
         context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
 
     private fun createSession(context: Context): OrtSession {
-        // Chiave di installazione nel nome: un aggiornamento dell'app che cambia il modello
-        // non riusa la copia vecchia. Le copie (e i .tmp) di installazioni precedenti si cancellano.
+        // Install key in the name: an app update that changes the model
+        // does not reuse the old copy. Copies (and .tmp files) from previous installs are deleted.
         val cacheDir = context.cacheDir
         val modelFile = File(cacheDir, "${MODEL_CACHE_PREFIX}_${installKey(context)}.onnx")
         cacheDir.listFiles { f -> f.name.startsWith(MODEL_CACHE_PREFIX) && f != modelFile }
             ?.forEach { it.delete() }
         if (!modelFile.exists()) {
-            Log.i(TAG, "Copio il modello ONNX in cache: ${modelFile.absolutePath}")
+            Log.i(TAG, "Copying the ONNX model to cache: ${modelFile.absolutePath}")
             context.assets.open(MODEL_ASSET).use { input ->
                 copyAssetStreamToFile(input, modelFile)
             }
@@ -218,9 +218,9 @@ class VocalRemover(
         )
         val options = OrtSession.SessionOptions().apply {
             when (backend) {
-                // Default ORT: XNNPACK misurato più lento su Realme (7,2–8,0 s/chunk contro
-                // 5,8–6,2 s) e in crash nativo dentro session.run su OPPO. Thread intra-op e
-                // quantizzazione INT8 misurati senza guadagni utili (vedi copilot-instructions).
+                // ORT default: XNNPACK measured slower on Realme (7.2–8.0 s/chunk vs
+                // 5.8–6.2 s) and crashing natively inside session.run on OPPO. Intra-op threads and
+                // INT8 quantization measured with no useful gains (see copilot-instructions).
                 ExecutionBackend.CPU -> Unit
                 ExecutionBackend.WEBGPU -> addWebGPU(mapOf(
                     "device_id" to "0",
@@ -229,7 +229,7 @@ class VocalRemover(
                 ))
                 ExecutionBackend.QNN -> {
                     val libDir = context.applicationInfo.nativeLibraryDir
-                    // INFO: ORT registra quanti nodi del grafo vengono assegnati a QNN.
+                    // INFO: ORT logs how many graph nodes are assigned to QNN.
                     setSessionLogLevel(OrtLoggingLevel.ORT_LOGGING_LEVEL_INFO)
                     QnnConfig.freeDimensionOverrides.forEach { (name, value) ->
                         setSymbolicDimensionValue(name, value)
@@ -237,7 +237,7 @@ class VocalRemover(
                     addQnn(QnnConfig.providerOptions(libDir))
                 }
             }
-            Log.d(TAG, "Provider disponibili: ${OrtEnvironment.getAvailableProviders()}")
+            Log.d(TAG, "Available providers: ${OrtEnvironment.getAvailableProviders()}")
         }
         val sessionStart = System.currentTimeMillis()
         val session = if (backend == ExecutionBackend.QNN) {
@@ -245,11 +245,11 @@ class VocalRemover(
         } else {
             env.createSession(modelFile.absolutePath, options)
         }
-        Log.i(TAG, "Sessione ONNX creata in ${System.currentTimeMillis() - sessionStart} ms")
+        Log.i(TAG, "ONNX session created in ${System.currentTimeMillis() - sessionStart} ms")
         return session
     }
 
-    /** Carica il grafo HTP compilato se presente, altrimenti compila e lo salva. */
+    /** Loads the compiled HTP graph if present, otherwise compiles and saves it. */
     private fun createQnnSession(context: Context, modelFile: File, options: OrtSession.SessionOptions): OrtSession {
         val dir = context.filesDir
        // @Suppress("DEPRECATION")
@@ -258,23 +258,23 @@ class VocalRemover(
             .forEach { File(dir, it).delete() }
         if (ctxFile.exists()) {
             try {
-                Log.i(TAG, "QNN: carico il contesto compilato ${ctxFile.name}")
+                Log.i(TAG, "QNN: loading the compiled context ${ctxFile.name}")
                 return env.createSession(ctxFile.absolutePath, options)
             } catch (e: OrtException) {
-                Log.w(TAG, "QNN: contesto non valido, ricompilo", e)
+                Log.w(TAG, "QNN: invalid context, recompiling", e)
                 ctxFile.delete()
             }
         }
-        Log.i(TAG, "QNN: compilo il grafo HTP (solo al primo avvio, può richiedere minuti)")
+        Log.i(TAG, "QNN: compiling the HTP graph (first launch only, may take minutes)")
         QnnConfig.contextGenerationConfig(ctxFile).forEach { (k, v) -> options.addConfigEntry(k, v) }
         return env.createSession(modelFile.absolutePath, options)
     }
 
     /**
-     * Una sola elaborazione per istanza: chunker, STFT e mappe dei tensori hanno buffer di lavoro
-     * condivisi. Le chiamate concorrenti (es. import file + cattura) si mettono in coda; l'attesa
-     * è cancellabile. Buffer per chiamata raddoppierebbero la memoria senza guadagno: il modello
-     * satura già la CPU/NPU.
+     * One processing run per instance: chunker, STFT and tensor maps share working
+     * buffers. Concurrent calls (e.g. file import + capture) are queued; the wait
+     * is cancellable. Per-call buffers would double the memory for no gain: the model
+     * already saturates the CPU/NPU.
      */
     suspend fun removeVocals(
         signal: StereoPcm,
@@ -286,10 +286,10 @@ class VocalRemover(
         onProgress: (Int) -> Unit
     ): StereoPcm {
         var start = 0L
-        Log.i(TAG, "Rimozione voce iniziata: frames=${signal.size}")
+        Log.i(TAG, "Vocal removal started: frames=${signal.size}")
         onProgress(2)
 
-        // 1. Normalizzazione di picco — una sola passata, niente max()/abs() per campione.
+        // 1. Peak normalization — a single pass, no per-sample max()/abs().
         val peak = peakOf(signal.left, signal.right)
         val normalized = peak > NORMALIZATION_PEAK
 
@@ -313,13 +313,13 @@ class VocalRemover(
             procRight = signal.right
         }
 
-        // 2. Chunking + inferenza
+        // 2. Chunking + inference
         val ctx = coroutineContext
         val chunkSize = HOP_LENGTH * (DIM_T - 1)
         val workspace = ModelWorkspace(env, mdxStft.freqBins, chunkSize)
         var chunksDone = 0
         val estimatedChunks = chunker.chunkCount(signal.size)
-        Log.i(TAG, "Chunking MDX: estimatedChunks=$estimatedChunks chunkFrames=${HOP_LENGTH * (DIM_T - 1)}")
+        Log.i(TAG, "MDX chunking: estimatedChunks=$estimatedChunks chunkFrames=${HOP_LENGTH * (DIM_T - 1)}")
 
         val instrumentalLeft = FloatArray(signal.size)
         val instrumentalRight = FloatArray(signal.size)
@@ -331,14 +331,14 @@ class VocalRemover(
                 val result = runModelOnChunk(chunkL, chunkR, workspace, logSanity = chunksDone == 0)
                 chunksDone++
                 if (chunksDone == 1 || chunksDone % 10 == 0 || chunksDone == estimatedChunks) {
-                    Log.i(TAG, "Rimozione voce avanzamento: chunk=$chunksDone/$estimatedChunks")
+                    Log.i(TAG, "Vocal removal progress: chunk=$chunksDone/$estimatedChunks")
                 }
                 onProgress(2 + minOf(93, (chunksDone * 93) / estimatedChunks))
                 Log.i(TAG, "Chunk processing time: ${System.currentTimeMillis() - start} ms")
                 result
             }
         }
-        Log.i(TAG, "Inferenza totale: ${System.currentTimeMillis() - totalStart} ms per $chunksDone chunk")
+        Log.i(TAG, "Total inference: ${System.currentTimeMillis() - totalStart} ms for $chunksDone chunks")
 
         if (normalized) {
             for (i in instrumentalLeft.indices) {
@@ -347,7 +347,7 @@ class VocalRemover(
             }
         }
 
-        // 4. Normalizzazione di sicurezza in output (una sola passata)
+        // 4. Safety normalization on output (a single pass)
         val outputPeak = peakOf(instrumentalLeft, instrumentalRight)
         if (outputPeak > NORMALIZATION_PEAK) {
             val outScale = NORMALIZATION_PEAK / outputPeak
@@ -358,18 +358,18 @@ class VocalRemover(
         }
 
         onProgress(100)
-        Log.i(TAG, "Rimozione voce completata: frames=${signal.size} outputPeak=$outputPeak")
+        Log.i(TAG, "Vocal removal completed: frames=${signal.size} outputPeak=$outputPeak")
         return StereoPcm(instrumentalLeft, instrumentalRight)
     }
 
-    /** Esegue STFT -> ONNX -> ISTFT su un singolo chunk stereo. */
+    /** Runs STFT -> ONNX -> ISTFT on a single stereo chunk. */
     private fun runModelOnChunk(
         chunkL: FloatArray,
         chunkR: FloatArray,
         workspace: ModelWorkspace,
         logSanity: Boolean
     ): Pair<FloatArray, FloatArray> {
-        // --- STFT forward (L e R in un'unica FFT complessa per frame) ---
+        // --- Forward STFT (L and R in a single complex FFT per frame) ---
         val t0 = System.nanoTime()
         mdxStft.forwardStereoInto(
             chunkL, chunkR,
@@ -387,12 +387,12 @@ class VocalRemover(
         workspace.inputBuffer.rewind()
         workspace.inputBuffer.put(workspace.inputData)
         workspace.inputBuffer.rewind()
-        val t2 = System.nanoTime()   // tensore di input pronto per ONNX
+        val t2 = System.nanoTime()   // input tensor ready for ONNX
 
         withSession { model ->
             inputMap[model.inputName] = workspace.inputTensor
             outputMap[model.outputName] = workspace.outputTensor
-            // Output "pinned": ORT scrive direttamente in workspace.outputBuffer.
+            // "Pinned" output: ORT writes directly into workspace.outputBuffer.
             model.session.run(inputMap, outputMap).use { }
         }
         val tRun = System.nanoTime()
@@ -406,7 +406,7 @@ class VocalRemover(
                 if (v.isNaN() || v.isInfinite()) nanCount++
                 else if (kotlin.math.abs(v) > maxAbs) maxAbs = kotlin.math.abs(v)
             }
-            Log.i(TAG, "ONNX sanity (primo chunk): maxAbs=$maxAbs NaN=$nanCount")
+            Log.i(TAG, "ONNX sanity (first chunk): maxAbs=$maxAbs NaN=$nanCount")
         }
         val tRead = System.nanoTime()
 
@@ -421,15 +421,15 @@ class VocalRemover(
         )
         val tEnd = System.nanoTime()
 
-        Log.i(TAG, "Fasi: " +
+        Log.i(TAG, "Stages: " +
                 "STFT=${(t1-t0)/1_000_000}ms " +
                 "write=${(t2-t1)/1_000_000}ms " +
                 "ONNX.run=${(tRun-t2)/1_000_000}ms " +
                 "readOutput=${(tRead-tRun)/1_000_000}ms " +
                 "ISTFT=${(tEnd-tRead)/1_000_000}ms")
 
-        // ATTENZIONE: restituiamo gli stessi buffer a ogni chiamata.
-        // Sicuro SOLO perché MdxChunker li consuma (overlap-add) prima di richiamarci.
+        // WARNING: we return the same buffers on every call.
+        // Safe ONLY because MdxChunker consumes them (overlap-add) before calling us again.
         return Pair(workspace.chunkOutL, workspace.chunkOutR)
     }
 
@@ -448,11 +448,11 @@ class VocalRemover(
     }
 
     /**
-     * Scrive un canale [DIM_T, DIM_F] (row-major frame-major) nel layout ONNX
-     * [channel][DIM_F][DIM_T] usando trasposizione a blocchi.
+     * Writes one channel [DIM_T, DIM_F] (row-major, frame-major) into the ONNX layout
+     * [channel][DIM_F][DIM_T] using a blocked transpose.
      *
-     * Lettura src:  data[frame * DIM_F + bin]  (contigua per bin all'interno di un frame)
-     * Scrittura dst: dest[channelOffset + bin * DIM_T + frame]  (contigua per frame all'interno di un bin)
+     * Source read:  data[frame * DIM_F + bin]  (contiguous by bin within a frame)
+     * Dest write: dest[channelOffset + bin * DIM_T + frame]  (contiguous by frame within a bin)
      */
     private fun writeChannel(dest: FloatArray, channel: Int, data: FloatArray) {
         val channelOffset = channel * DIM_F * DIM_T
@@ -483,8 +483,8 @@ class VocalRemover(
     }
 
     /**
-     * Trasposizione bloccata dal layout ONNX [channel][DIM_F][DIM_T] al layout STFT
-     * [frame * freqBins + bin]. Il bin di padding (indice DIM_F) viene azzerato per frame.
+     * Blocked transpose from the ONNX layout [channel][DIM_F][DIM_T] to the STFT layout
+     * [frame * freqBins + bin]. The padding bin (index DIM_F) is zeroed per frame.
      */
     private fun readChannelToFullSpectrum(src: FloatArray, channel: Int, dest: FloatArray) {
         val channelOffset = channel * DIM_F * DIM_T
@@ -514,7 +514,7 @@ class VocalRemover(
             i0 += block
         }
 
-        // Padding bin DIM_F: un solo valore per frame.
+        // Padding bin DIM_F: a single value per frame.
         var frameBase = DIM_F
         var frame = 0
         while (frame < cols) {
@@ -527,7 +527,7 @@ class VocalRemover(
     fun close() {
         synchronized(runLock) {
             closed = true
-            // Con una run in corso la chiusura è rimandata a withSession.
+            // With a run in progress, closing is deferred to withSession.
             if (runsInFlight == 0) loadedRef.getAndSet(null)?.session?.close()
         }
     }

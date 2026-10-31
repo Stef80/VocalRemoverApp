@@ -26,10 +26,10 @@ private class RandomAccessWavFileAccess(file: File) : WavFileAccess {
 }
 
 /**
- * Scrive incrementalmente un file WAV (PCM 16-bit, interleaved) senza
- * tenere l'intera registrazione in memoria: i dati vengono appesi mano a
- * mano, l'header con le dimensioni finali viene scritto/corretto solo
- * alla chiusura (`close()`).
+ * Writes a WAV file (16-bit PCM, interleaved) incrementally without
+ * keeping the whole recording in memory: data is appended as it
+ * comes, the header with the final sizes is written/fixed only
+ * on close (`close()`).
  */
 internal class WavFileWriter(
     private val fileAccess: WavFileAccess,
@@ -61,13 +61,13 @@ internal class WavFileWriter(
 
     init {
         fileAccess.setLength(0)
-        fileAccess.seek(HEADER_SIZE.toLong()) // placeholder: header scritto/corretto in close()
+        fileAccess.seek(HEADER_SIZE.toLong()) // placeholder: header written/fixed in close()
     }
 
     fun write(buffer: ByteArray, offset: Int, length: Int) {
-        check(!closed) { "WavFileWriter già chiuso" }
+        check(!closed) { "WavFileWriter already closed" }
         require(canAppendData(dataBytesWritten, length)) {
-            "I dati PCM superano il limite massimo supportato dal formato WAV"
+            "PCM data exceeds the maximum size supported by the WAV format"
         }
         fileAccess.write(buffer, offset, length)
         dataBytesWritten += length
@@ -102,7 +102,7 @@ internal class WavFileWriter(
         header.putInt((36 + dataBytesWritten).toInt())
         header.put("WAVE".toByteArray(Charsets.US_ASCII))
         header.put("fmt ".toByteArray(Charsets.US_ASCII))
-        header.putInt(16) // dimensione subchunk fmt
+        header.putInt(16) // fmt subchunk size
         header.putShort(1) // PCM
         header.putShort(channelCount.toShort())
         header.putInt(sampleRate)

@@ -38,16 +38,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Cattura in attesa → editor di taglio → elaborazione, oppure file scelto dalla memoria →
- * elaborazione immediata. Legato a `MainActivity`, condiviso da `ImportSongScreen` e
- * `TrimEditorScreen`: l'elaborazione continua anche cambiando schermata.
+ * Pending capture → trim editor → processing, or file picked from storage →
+ * immediate processing. Tied to `MainActivity`, shared by `ImportSongScreen` and
+ * `TrimEditorScreen`: processing goes on even when switching screens.
  */
 class ImportViewModel(
     private val captures: PendingCaptureRepository,
     private val processor: SongProcessor,
     private val player: PreviewPlayer,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-    /** Nome del file scelto (`OpenableColumns.DISPLAY_NAME`); null se non disponibile. */
+    /** Name of the picked file (`OpenableColumns.DISPLAY_NAME`); null if not available. */
     private val displayNameOf: (Uri) -> String? = { null },
     private val releaseResources: () -> Unit = {},
 ) : ViewModel() {
@@ -55,7 +55,7 @@ class ImportViewModel(
     private val _importState = MutableStateFlow<ImportUiState>(ImportUiState.Empty)
     val importState: StateFlow<ImportUiState> = _importState.asStateFlow()
 
-    /** null = editor chiuso. */
+    /** null = editor closed. */
     private val _editorState = MutableStateFlow<EditorUiState?>(null)
     val editorState: StateFlow<EditorUiState?> = _editorState.asStateFlow()
 
@@ -68,7 +68,7 @@ class ImportViewModel(
     private var previewErrorReported = false
     private var processingJob: Job? = null
 
-    /** Seek chiesto dalla card prima che il player abbia caricato il suo file: si applica dopo play(). */
+    /** Seek requested by the card before the player has loaded its file: applied after play(). */
     private var pendingCardSeekMs: Long? = null
 
     init {
@@ -79,7 +79,7 @@ class ImportViewModel(
         viewModelScope.launch { player.state.collect(::onPlayerState) }
     }
 
-    /** [openEditor]: chiamata a fine cattura, apre subito l'editor se c'è una cattura. */
+    /** [openEditor]: called when a capture ends, opens the editor right away if there is a capture. */
     fun loadPendingCapture(openEditor: Boolean) {
         viewModelScope.launch { load(openEditor) }
     }
@@ -94,14 +94,14 @@ class ImportViewModel(
         _editorState.value = null
     }
 
-    /** Uscendo dalla scheda Cattura dal footer. */
+    /** When leaving the Capture tab from the footer. */
     fun pausePreview() = player.pause()
 
     fun onNameChange(name: String) {
         _editorState.update { it?.copy(name = name) }
     }
 
-    /** Durante il trascinamento: si muove la maniglia il cui valore è cambiato. */
+    /** While dragging: the handle whose value changed moves. */
     fun onHandlesChange(startMs: Long, endMs: Long) {
         _editorState.update { editor ->
             when {
@@ -114,7 +114,7 @@ class ImportViewModel(
         }
     }
 
-    /** Rilasciando una maniglia l'ascolto salta lì, per sentire subito il punto di taglio. */
+    /** Releasing a handle jumps playback there, to hear the cut point right away. */
     fun onHandleReleased(which: TrimHandle) {
         val editor = _editorState.value ?: return
         seekEditor(TrimHandles.seekAfterRelease(which, editor.startMs, editor.endMs))
@@ -165,7 +165,7 @@ class ImportViewModel(
                     captures.saveEdit(editor.name, editor.startMs, editor.endMs)
                 }
                 capture = saved
-                // Il file tagliato può avere lo stesso percorso di prima: stop() obbliga a ricaricarlo.
+                // The trimmed file may have the same path as before: stop() forces a reload.
                 player.stop()
                 pendingCardSeekMs = null
                 _editorState.value = null
@@ -174,7 +174,7 @@ class ImportViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Salvataggio del taglio fallito", e)
+                Log.e(TAG, "Saving the trim failed", e)
                 _editorState.update { it?.copy(isSaving = false) }
                 _events.send(ImportEvent.EditFailed)
             }
@@ -182,7 +182,7 @@ class ImportViewModel(
     }
 
     fun process() {
-        // Un secondo tocco prima che lo stato diventi Processing non deve avviare un'altra elaborazione.
+        // A second tap before the state becomes Processing must not start another processing run.
         if (processingJob?.isActive == true) return
         if (_importState.value !is ImportUiState.CaptureReady) return
         val current = capture ?: return
@@ -193,8 +193,8 @@ class ImportViewModel(
                 load(openEditor = false)
                 return@launch
             }
-            // Il lease va rilasciato su ogni uscita che non sia la riuscita, anche se il ViewModel
-            // viene distrutto a metà: altrimenti la cattura resta bloccata fino alla morte del processo.
+            // The lease must be released on every exit other than success, even if the ViewModel
+            // is destroyed midway: otherwise the capture stays locked until the process dies.
             var leaseHandled = false
             try {
                 runProcessing(current)
@@ -222,8 +222,8 @@ class ImportViewModel(
         try {
             withContext(ioDispatcher) { captures.completeProcessing(savedUri) }
         } catch (e: Exception) {
-            // Lo strumentale è salvato: si segnala comunque la riuscita, lo stato si rilegge.
-            Log.e(TAG, "Pulizia della cattura dopo l'elaborazione fallita", e)
+            // The instrumental is saved: report success anyway, the state is read again.
+            Log.e(TAG, "Post-processing capture cleanup failed", e)
         }
         capture = null
         _importState.value = ImportUiState.Empty
@@ -232,8 +232,8 @@ class ImportViewModel(
     }
 
     /**
-     * File scelto con «Sfoglia memoria»: si elabora subito e lo strumentale finisce in libreria,
-     * come nel caricamento da file di `:engine`. L'eventuale cattura in attesa resta intatta.
+     * File picked with «Sfoglia memoria»: it is processed right away and the instrumental ends up in the library,
+     * as in `:engine`'s file loading. Any pending capture stays intact.
      */
     fun processFile(source: Uri) {
         if (processingJob?.isActive == true) return
@@ -244,7 +244,7 @@ class ImportViewModel(
                 try {
                     displayNameOf(source)
                 } catch (e: Exception) {
-                    Log.w(TAG, "Nome del file non disponibile: $source", e)
+                    Log.w(TAG, "File name not available: $source", e)
                     null
                 }
             }
@@ -259,14 +259,14 @@ class ImportViewModel(
             } catch (e: ProcessingException) {
                 _events.send(ImportEvent.ProcessingFailed(e.error, fromFile = true))
             } finally {
-                // load() ignora lo stato Processing: lo si azzera prima di rileggere la cattura.
+                // load() ignores the Processing state: reset it before reading the capture again.
                 if (_importState.value is ImportUiState.Processing) _importState.value = ImportUiState.Empty
             }
             load(openEditor = false)
         }
     }
 
-    /** Lancia [SongProcessor.process] riportandone le fasi in [ImportUiState.Processing]. */
+    /** Launches [SongProcessor.process], reporting its stages in [ImportUiState.Processing]. */
     private suspend fun processWithProgress(
         source: Uri,
         name: String,
@@ -336,7 +336,7 @@ class ImportViewModel(
                 try {
                     captures.peaks(WAVEFORM_BUCKETS)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Forma d'onda non disponibile", e)
+                    Log.e(TAG, "Waveform not available", e)
                     FloatArray(0)
                 }
             }
@@ -344,7 +344,7 @@ class ImportViewModel(
         }
     }
 
-    /** L'editor suona sempre la cattura originale: le maniglie sono sui suoi tempi. */
+    /** The editor always plays the original capture: the handles are on its times. */
     private fun seekEditor(positionMs: Long) {
         _editorState.update { it?.copy(positionMs = positionMs) }
         if (player.state.value.currentUri == editorUri()) player.seekTo(positionMs)
@@ -363,7 +363,7 @@ class ImportViewModel(
         val editor = _editorState.value ?: return
         if (state.currentUri == null || state.currentUri != editorUri()) return
         if (state.isPlaying && state.positionMs >= editor.endMs) {
-            // Si ferma alla maniglia di fine: si sente esattamente cosa resterà.
+            // Stops at the end handle: you hear exactly what will remain.
             player.pause()
             player.seekTo(editor.endMs)
             _editorState.update { it?.copy(isPlaying = false, positionMs = editor.endMs) }

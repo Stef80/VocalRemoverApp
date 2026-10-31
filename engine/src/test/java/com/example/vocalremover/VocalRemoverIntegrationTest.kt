@@ -7,11 +7,11 @@ import org.junit.Test
 import java.io.File
 
 /**
- * Verifica la logica di chunking stereo + normalizzazione di picco SENZA caricare il vero
- * modello ONNX (troppo pesante/lento per un unit test JVM): testiamo direttamente
- * MdxChunker.processStereo con un "modello" fittizio (identity), per garantire che se il vero
- * modello restituisse l'input invariato, l'output combacerebbe esattamente con l'originale
- * (nessuna perdita/introduzione di offset nel chunking).
+ * Checks the stereo chunking + peak normalization logic WITHOUT loading the real
+ * ONNX model (too heavy/slow for a JVM unit test): we test directly
+ * MdxChunker.processStereo with a fake (identity) "model", to guarantee that if the real
+ * model returned its input unchanged, the output would match the original exactly
+ * (no loss/introduced offset in chunking).
  */
 class VocalRemoverIntegrationTest {
 

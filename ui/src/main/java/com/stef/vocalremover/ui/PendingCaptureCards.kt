@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.dp
 import com.example.vocalremover.playback.PlayerState
 import com.example.vocalremover.ui.R
 
-/** Card della cattura in attesa, al posto di "Registra audio interno": nome, Modifica, Scarta. */
+/** Card of the pending capture, in place of "Registra audio interno": name, Edit, Discard. */
 @Composable
 internal fun PendingCaptureCard(
     name: String,
@@ -96,7 +96,7 @@ internal fun PendingCaptureCard(
     }
 }
 
-/** Ascolto del risultato (tagliato o intero) prima di elaborare. */
+/** Listen to the result (trimmed or whole) before processing. */
 @Composable
 internal fun PreviewPlayerCard(
     playerState: PlayerState,
@@ -107,7 +107,7 @@ internal fun PreviewPlayerCard(
 ) {
     val playback = previewPlaybackFor(playerState, playableUri, fallbackDurationMs)
     val durationMs = playback.durationMs
-    // Valore dello slider durante il trascinamento; il seek parte solo al rilascio.
+    // Slider value while dragging; the seek starts only on release.
     var dragging by remember { mutableStateOf<Float?>(null) }
     val positionMs = dragging?.toLong() ?: playback.positionMs
     CardSurface {
@@ -148,7 +148,7 @@ internal fun PreviewPlayerCard(
     }
 }
 
-/** Cosa mostra la card del player: lo stato condiviso vale solo se riguarda il file della card. */
+/** What the player card shows: the shared state counts only if it concerns the card's file. */
 internal data class PreviewPlayback(val isPlaying: Boolean, val positionMs: Long, val durationMs: Long)
 
 internal fun previewPlaybackFor(state: PlayerState, playableUri: Uri, fallbackDurationMs: Long): PreviewPlayback {
@@ -160,7 +160,7 @@ internal fun previewPlaybackFor(state: PlayerState, playableUri: Uri, fallbackDu
     )
 }
 
-/** Avanzamento dell'elaborazione, al posto del player. */
+/** Processing progress, in place of the player. */
 @Composable
 internal fun ProcessingProgressCard(phase: ProcessingPhase) {
     CardSurface {

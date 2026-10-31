@@ -1,18 +1,18 @@
 package com.stef.vocalremover.ui.overlay
 
 /**
- * Stato puro (nessuna dipendenza Android) del widget flottante di registrazione.
- * Le transizioni sono funzioni pure: non effettuano IO, non toccano WindowManager
- * né i servizi di cattura. `BubbleOverlayService` le usa per decidere cosa fare
- * e `BubbleOverlayView` per decidere cosa mostrare.
+ * Pure state (no Android dependencies) of the floating recording widget.
+ * Transitions are pure functions: they do no IO and touch neither WindowManager
+ * nor the capture services. `BubbleOverlayService` uses them to decide what to do
+ * and `BubbleOverlayView` to decide what to show.
  */
 enum class BubbleOverlayPhase {
     IDLE,
     APP_SELECTED,
     AWAITING_CONSENT,
-    /** Cattura attiva, in attesa che l'app sorgente inizi a riprodurre. */
+    /** Active capture, waiting for the source app to start playing. */
     LISTENING,
-    /** Annullamento richiesto durante l'ascolto: si attende la chiusura del servizio. */
+    /** Cancellation requested while listening: waiting for the service to close. */
     CANCELLING,
     RECORDING,
     STOPPING,
@@ -27,10 +27,10 @@ data class BubbleOverlayState(
 )
 
 /**
- * Transizioni valide tra stati del bubble. Ogni funzione ritorna il nuovo stato,
- * oppure null se la transizione non è valida nello stato corrente (il chiamante
- * ignora l'evento invece di propagare un'eccezione: eventi fuori ordine possono
- * arrivare da broadcast asincroni del servizio di cattura).
+ * Valid transitions between bubble states. Each function returns the new state,
+ * or null if the transition is not valid in the current state (the caller
+ * ignores the event instead of propagating an exception: out-of-order events can
+ * arrive from asynchronous broadcasts of the capture service).
  */
 object BubbleOverlayTransitions {
 
@@ -39,7 +39,7 @@ object BubbleOverlayTransitions {
         packageName: String,
         targetUid: Int
     ): BubbleOverlayState? =
-        // APP_SELECTED è ammesso per cambiare app (click lungo sul bubble collassato).
+        // APP_SELECTED is allowed to change app (long click on the collapsed bubble).
         if (current.phase == BubbleOverlayPhase.IDLE ||
             current.phase == BubbleOverlayPhase.APP_SELECTED ||
             current.phase == BubbleOverlayPhase.ERROR
@@ -77,7 +77,7 @@ object BubbleOverlayTransitions {
             null
         }
 
-    /** Fine dell'annullamento: l'app resta scelta, così un tap riavvia l'ascolto. */
+    /** End of the cancellation: the app stays picked, so a tap restarts listening. */
     fun cancelled(current: BubbleOverlayState): BubbleOverlayState? =
         if (current.phase == BubbleOverlayPhase.CANCELLING) {
             BubbleOverlayState(BubbleOverlayPhase.APP_SELECTED, current.packageName, current.targetUid)
@@ -93,9 +93,9 @@ object BubbleOverlayTransitions {
         }
 
     /**
-     * Il servizio ha prodotto un file: oltre che dopo lo stop manuale accade anche
-     * per lo stop automatico a fine brano (da RECORDING) o se l'audio arriva a ridosso
-     * di un annullamento o prima del broadcast di inizio registrazione.
+     * The service produced a file: besides after a manual stop this also happens
+     * on the automatic stop at the end of the track (from RECORDING) or if audio arrives right around
+     * a cancellation or before the recording-started broadcast.
      */
     fun stopped(current: BubbleOverlayState): BubbleOverlayState? =
         if (current.phase == BubbleOverlayPhase.STOPPING ||

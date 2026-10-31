@@ -7,9 +7,9 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * Brano sintetico deterministico (nessun file audio protetto da copyright nel repo):
- * accordi e basso con panning diverso su L/R, percussioni a rumore e una "voce"
- * armonica con vibrato al centro, come in un mix reale.
+ * Deterministic synthetic song (no copyrighted audio files in the repo):
+ * chords and bass panned differently on L/R, noise percussion and a harmonic
+ * "voice" with vibrato in the center, as in a real mix.
  */
 object SyntheticStereoSignal {
 
@@ -23,7 +23,7 @@ object SyntheticStereoSignal {
         val sr = sampleRate.toDouble()
 
         val chordRoots = DoubleArray(4) { 110.0 * Math.pow(2.0, rnd.nextInt(0, 12) / 12.0) }
-        val beat = 0.5 // secondi
+        val beat = 0.5 // seconds
         val noteLen = (sr * 0.25).toInt()
         val vocalPhaseOffset = rnd.nextDouble() * 2 * PI
         var vocalPhase = 0.0
@@ -33,7 +33,7 @@ object SyntheticStereoSignal {
             val bar = ((t / (4 * beat)).toInt()) % chordRoots.size
             val root = chordRoots[bar]
 
-            // Accordo (fondamentale, terza, quinta) a sinistra, ottava a destra
+            // Chord (root, third, fifth) on the left, octave on the right
             var l = 0.0
             var r = 0.0
             for ((k, ratio) in doubleArrayOf(1.0, 1.26, 1.5).withIndex()) {
@@ -45,13 +45,13 @@ object SyntheticStereoSignal {
             l += bass
             r += bass
 
-            // Percussione: burst di rumore a ogni battito, decadimento esponenziale
+            // Percussion: noise burst on every beat, exponential decay
             val sinceBeat = t % beat
             val drum = (rnd.nextDouble() * 2 - 1) * exp(-sinceBeat * 30) * 0.25
             l += drum * 0.7
             r += drum
 
-            // Voce al centro: armoniche con vibrato, sillabe on/off
+            // Voice in the center: harmonics with vibrato, syllables on/off
             val f0 = root * 2 * (1 + 0.01 * sin(2 * PI * 5.5 * t))
             vocalPhase += 2 * PI * f0 / sr
             val syllable = if ((i / noteLen) % 3 != 2) 1.0 else 0.0

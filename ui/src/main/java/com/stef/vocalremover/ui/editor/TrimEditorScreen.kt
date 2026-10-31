@@ -43,7 +43,7 @@ import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 import kotlin.math.abs
 import kotlin.math.sin
 
-/** Editor di taglio della registrazione: nome, maniglie di inizio/fine, ascolto, Salva/Chiudi. */
+/** Recording trim editor: name, start/end handles, playback, Save/Close. */
 @Composable
 fun TrimEditorScreen(
     state: EditorUiState,

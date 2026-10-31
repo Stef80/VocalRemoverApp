@@ -5,14 +5,14 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Suddivisione a finestre sovrapposte (25% di default) del segnale stereo in chunk di
- * dimensione fissa richiesta dal grafo ONNX (chunkSize = hopLength*(dimT-1) campioni).
- * Ogni chunk viene passato a [processChunk] (STFT->ONNX->ISTFT), poi ricombinato con
- * overlap-add pesato da una finestra di Hann SIMMETRICA (numpy.hanning). Replica
- * l'algoritmo MDXSeparator.demix() di audio-separator.
+ * Splits the stereo signal into overlapping windows (25% by default) of the fixed
+ * chunk size required by the ONNX graph (chunkSize = hopLength*(dimT-1) samples).
+ * Each chunk is passed to [processChunk] (STFT->ONNX->ISTFT), then recombined with
+ * overlap-add weighted by a SYMMETRIC Hann window (numpy.hanning). Replicates
+ * the MDXSeparator.demix() algorithm of audio-separator.
  *
- * NOTA: non thread-safe. Le callback di processStereoInto devono essere sincrone e non
- * devono trattenere i riferimenti ai chunkL/chunkR passati (vengono riutilizzati).
+ * NOTE: not thread-safe. The processStereoInto callbacks must be synchronous and must
+ * not keep references to the chunkL/chunkR they receive (they are reused).
  */
 class MdxChunker(
     nFft: Int = 5120,
@@ -27,18 +27,18 @@ class MdxChunker(
     private val fullChunkWindow: FloatArray? =
         if (useOverlap) symmetricHann(chunkSize) else null
 
-    // Scratch riutilizzati per ogni chunk (evita ~2 MB di allocazioni per iterazione).
+    // Scratch buffers reused for every chunk (avoids ~2 MB of allocations per iteration).
     private val chunkL = FloatArray(chunkSize)
     private val chunkR = FloatArray(chunkSize)
 
     init {
         require(genSize > 0) {
-            "genSize deve essere positivo (chunkSize=$chunkSize, trim=$trim); " +
-                    "aumentare dimT/hopLength o ridurre nFft"
+            "genSize must be positive (chunkSize=$chunkSize, trim=$trim); " +
+                    "increase dimT/hopLength or reduce nFft"
         }
     }
 
-    /** Numero esatto di chiamate a processChunk per un segnale di [n] campioni. */
+    /** Exact number of processChunk calls for a signal of [n] samples. */
     fun chunkCount(n: Int): Int {
         val step = ((1.0 - overlap) * chunkSize).toInt()
         val mixtureLen = trim + n + genSize + trim - (n % genSize)
@@ -68,12 +68,12 @@ class MdxChunker(
         outRight: FloatArray,
         processChunk: (FloatArray, FloatArray) -> Pair<FloatArray, FloatArray>
     ) {
-        require(left.size == right.size) { "I canali devono avere la stessa lunghezza" }
+        require(left.size == right.size) { "Channels must have the same length" }
         require(outLeft.size == left.size) {
-            "L'output sinistro deve avere la stessa lunghezza dell'input"
+            "The left output must have the same length as the input"
         }
         require(outRight.size == right.size) {
-            "L'output destro deve avere la stessa lunghezza dell'input"
+            "The right output must have the same length as the input"
         }
 
         val n = left.size
@@ -81,7 +81,7 @@ class MdxChunker(
         val pad = genSize + trim - (n % genSize)
         val mixtureLen = trim + n + pad
 
-        // Accumulatori: usiamo direttamente outLeft/outRight per risparmiare memoria (evita 2 * FloatArray(n)).
+        // Accumulators: we use outLeft/outRight directly to save memory (avoids 2 * FloatArray(n)).
         java.util.Arrays.fill(outLeft, 0f)
         java.util.Arrays.fill(outRight, 0f)
         val divider = FloatArray(n)
@@ -97,15 +97,15 @@ class MdxChunker(
             fillChunkPadded(left, n, i, actualLen, chunkL)
             fillChunkPadded(right, n, i, actualLen, chunkR)
             if (actualLen < chunkSize) {
-                // Solo l'ultimo chunk è più corto: azzera la coda per non lasciare dati
-                // stantii dall'iterazione precedente.
+                // Only the last chunk is shorter: zero the tail so no stale data
+                // is left from the previous iteration.
                 java.util.Arrays.fill(chunkL, actualLen, chunkSize, 0f)
                 java.util.Arrays.fill(chunkR, actualLen, chunkSize, 0f)
             }
 
             val (processedL, processedR) = processChunk(chunkL, chunkR)
 
-            // Intersezione fra [i, i+actualLen) e [outStart, outEnd).
+            // Intersection of [i, i+actualLen) and [outStart, outEnd).
             val effStart = max(i, outStart)
             val effEnd = min(i + actualLen, outEnd)
             val effLen = effEnd - effStart
@@ -145,9 +145,9 @@ class MdxChunker(
     }
 
     /**
-     * Riempie [dest] con i campioni del chunk che inizia a [chunkStart] nel dominio
-     * "mixture" (con reflect-padding). Sostituisce il `paddedSample` per-campione con tre
-     * loop specializzati: prefisso riflesso / centro contiguo / suffisso riflesso.
+     * Fills [dest] with the samples of the chunk starting at [chunkStart] in the
+     * "mixture" domain (with reflect padding). Replaces the per-sample `paddedSample` with three
+     * specialized loops: reflected prefix / contiguous center / reflected suffix.
      */
     private fun fillChunkPadded(
         source: FloatArray,
@@ -158,14 +158,14 @@ class MdxChunker(
     ) {
         var k = 0
 
-        // Prefisso riflesso: chunkStart + k < trim
+        // Reflected prefix: chunkStart + k < trim
         val prefixEnd = min(len, trim - chunkStart).coerceAtLeast(0)
         while (k < prefixEnd) {
             dest[k] = source[reflectIndex(trim - (chunkStart + k), n)]
             k++
         }
 
-        // Centro contiguo: trim <= chunkStart + k < trim + n
+        // Contiguous center: trim <= chunkStart + k < trim + n
         val middleEnd = min(len, trim + n - chunkStart)
         var srcIdx = chunkStart + k - trim
         while (k < middleEnd) {
@@ -174,7 +174,7 @@ class MdxChunker(
             k++
         }
 
-        // Suffisso riflesso: chunkStart + k >= trim + n
+        // Reflected suffix: chunkStart + k >= trim + n
         while (k < len) {
             val tailIdx = (chunkStart + k) - (trim + n)
             dest[k] = source[reflectIndex(n - 2 - tailIdx, n)]

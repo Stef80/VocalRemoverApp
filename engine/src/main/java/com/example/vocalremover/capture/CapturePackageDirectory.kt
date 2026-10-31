@@ -6,10 +6,10 @@ import android.content.pm.PackageManager
 import org.xmlpull.v1.XmlPullParser
 
 /**
- * Legge/scrive i pacchetti candidati e recenti per il picker dell'app sorgente
- * da catturare. Condivisa tra la vecchia schermata XML (`MainActivity`) e il
- * widget flottante (`BubbleOverlayService`) per non duplicare l'accesso a
- * PackageManager/SharedPreferences/AndroidManifest in due posti.
+ * Reads/writes the candidate and recent packages for the source app picker
+ * to capture. Shared between the old XML screen (`MainActivity`) and the
+ * floating widget (`BubbleOverlayService`) so that access to
+ * PackageManager/SharedPreferences/AndroidManifest is not duplicated in two places.
  */
 class CapturePackageDirectory(private val context: Context) {
 
@@ -20,7 +20,7 @@ class CapturePackageDirectory(private val context: Context) {
         private const val MAX_RECENT = 10
     }
 
-    /** Pacchetti usati di recente per la cattura, dal più recente al meno recente. */
+    /** Packages recently used for capture, from most to least recent. */
     fun readRecentPackages(): List<String> {
         val prefs = context.getSharedPreferences(PREFS_CAPTURE_PACKAGE_PICKER, Context.MODE_PRIVATE)
         return prefs.getString(KEY_RECENT_CAPTURE_PACKAGES, "")
@@ -42,9 +42,9 @@ class CapturePackageDirectory(private val context: Context) {
     }
 
     /**
-     * Legge i pacchetti dichiarati in <queries><package android:name="..."/></queries>
-     * direttamente dall'AndroidManifest.xml compilato: è l'unica fonte di verità,
-     * non esiste una lista duplicata in Kotlin. Se il parsing fallisce, ritorna vuoto.
+     * Reads the packages declared in <queries><package android:name="..."/></queries>
+     * directly from the compiled AndroidManifest.xml: it is the single source of truth,
+     * there is no duplicated list in Kotlin. If parsing fails, returns empty.
      */
     fun readCandidatePackagesFromManifest(): List<String> {
         var parser: android.content.res.XmlResourceParser? = null
@@ -75,7 +75,7 @@ class CapturePackageDirectory(private val context: Context) {
         }
     }
 
-    /** Pacchetti candidati installati e abilitati, con l'etichetta da mostrare nel picker. */
+    /** Installed and enabled candidate packages, with the label to show in the picker. */
     fun candidateDisplayNames(): Map<String, String> {
         val packageManager = context.packageManager
         return readCandidatePackagesFromManifest()

@@ -127,7 +127,7 @@ class LibraryViewModelTest {
                 return listOf(b)
             }
         }
-        // Il primo load blocca un thread vero: serve un dispatcher reale per l'IO.
+        // The first load blocks a real thread: a real dispatcher is needed for IO.
         val viewModel = LibraryViewModel(repository, Dispatchers.IO)
         val states = mutableListOf<LibraryUiState>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.state.toList(states) }

@@ -5,16 +5,16 @@ import java.io.IOException
 import java.io.RandomAccessFile
 
 /**
- * Taglia un WAV PCM 16 bit copiando in streaming un intervallo del chunk data, senza decodificare
- * in float: memoria costante anche su catture lunghe. Scrive su `<target>.tmp` e lo rinomina solo
- * a copia completa, così un taglio interrotto non lascia un file rotto né tocca il target precedente.
+ * Trims a 16-bit PCM WAV by streaming a range of the data chunk, without decoding
+ * to float: constant memory even on long captures. Writes to `<target>.tmp` and renames it only
+ * once the copy is complete, so an interrupted trim leaves no broken file and does not touch the previous target.
  */
 object WavTrimmer {
 
     const val MIN_LENGTH_MS = 1000L
     private const val COPY_BUFFER_BYTES = 64 * 1024
 
-    /** Bloccante. Copia [startMs, endMs) di [source] in [target]. */
+    /** Blocking. Copies [startMs, endMs) of [source] into [target]. */
     fun trim(source: File, target: File, startMs: Long, endMs: Long) =
         trim(source, target, startMs, endMs) { file ->
             val info = WavFileReader.readInfo(source)
@@ -35,7 +35,7 @@ object WavTrimmer {
         require(endMs - startMs >= MIN_LENGTH_MS) { "Intervallo troppo corto: ${endMs - startMs} ms" }
 
         val startFrame = startMs * info.sampleRate / 1000
-        // La fine esattamente alla durata (troncata) deve includere anche gli ultimi frame.
+        // An end exactly at the (truncated) duration must include the last frames too.
         val endFrame = if (endMs == durationMs) info.frameCount else endMs * info.sampleRate / 1000
 
         val temp = File(target.path + ".tmp")
@@ -51,7 +51,7 @@ object WavTrimmer {
             }
             if (!temp.renameTo(target)) {
                 target.delete()
-                if (!temp.renameTo(target)) throw IOException("Impossibile rinominare ${temp.name}")
+                if (!temp.renameTo(target)) throw IOException("Cannot rename ${temp.name}")
             }
         } catch (failure: Throwable) {
             temp.delete()

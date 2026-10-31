@@ -74,7 +74,7 @@ class WavTrimmerTest {
         assertFalse(File(target.path + ".tmp").exists())
     }
 
-    /** Scrive davvero su disco (così il .tmp esiste) ma fallisce alla seconda write. */
+    /** Really writes to disk (so the .tmp exists) but fails on the second write. */
     private class FailingOnSecondWrite(file: File) : WavFileAccess {
         private val raf = RandomAccessFile(file, "rw")
         private var writes = 0

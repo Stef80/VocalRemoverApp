@@ -4,18 +4,18 @@ import kotlin.math.roundToLong
 
 enum class TrimHandle { START, END }
 
-/** Regole delle maniglie di taglio, separate dalla UI per poterle testare. Tempi in ms. */
+/** Rules for the trim handles, kept apart from the UI so they can be tested. Times in ms. */
 internal object TrimHandles {
     const val STEP_MS = 10L
     const val MIN_GAP_MS = 1000L
     const val END_PREVIEW_MS = 3000L
     const val ACCESSIBILITY_STEP_MS = 1000L
 
-    /** Arrotonda a STEP_MS, poi limita a [0, endMs - MIN_GAP_MS] (mai sotto 0). */
+    /** Rounds to STEP_MS, then clamps to [0, endMs - MIN_GAP_MS] (never below 0). */
     fun moveStart(requestedMs: Long, endMs: Long): Long =
         snap(requestedMs).coerceIn(0L, maxOf(0L, endMs - MIN_GAP_MS))
 
-    /** Arrotonda a STEP_MS, poi limita a [startMs + MIN_GAP_MS, durationMs] (mai sopra durationMs). */
+    /** Rounds to STEP_MS, then clamps to [startMs + MIN_GAP_MS, durationMs] (never above durationMs). */
     fun moveEnd(requestedMs: Long, startMs: Long, durationMs: Long): Long =
         snap(requestedMs).coerceIn(minOf(startMs + MIN_GAP_MS, durationMs), durationMs)
 
@@ -33,7 +33,7 @@ internal object TrimHandles {
         TrimHandle.END -> maxOf(startMs, endMs - END_PREVIEW_MS)
     }
 
-    /** positionMs se in [startMs, endMs), altrimenti startMs. */
+    /** positionMs if in [startMs, endMs), otherwise startMs. */
     fun playbackStart(positionMs: Long, startMs: Long, endMs: Long): Long =
         if (positionMs in startMs until endMs) positionMs else startMs
 

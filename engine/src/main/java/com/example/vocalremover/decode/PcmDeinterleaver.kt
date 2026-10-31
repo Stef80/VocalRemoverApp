@@ -4,14 +4,14 @@ import android.media.AudioFormat
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/** Converte un buffer PCM interleaved in uscita da MediaCodec nei due array L/R float. */
+/** Converts an interleaved PCM buffer output by MediaCodec into the two float L/R arrays. */
 internal object PcmDeinterleaver {
 
     private const val INV_SHORT = 1f / 32768f
 
     /**
-     * `KEY_PCM_ENCODING` del decoder → true se float. Senza chiave è 16 bit (default MediaCodec).
-     * Le altre codifiche (8, 24, 32 bit intero) lette come 16 bit darebbero rumore senza errore.
+     * Decoder `KEY_PCM_ENCODING` → true if float. Without the key it is 16 bit (MediaCodec default).
+     * Other encodings (8, 24, 32-bit integer) read as 16 bit would give noise without an error.
      */
     fun isFloatEncoding(encoding: Int?): Boolean = when (encoding) {
         null, AudioFormat.ENCODING_PCM_16BIT -> false
@@ -20,11 +20,11 @@ internal object PcmDeinterleaver {
     }
 
     /**
-     * Legge da `buffer.position()` a `buffer.limit()` e scrive in [left]/[right] a partire da
-     * [offset]. Il mono finisce uguale su L e R; oltre due canali si tengono i primi due.
-     * Il chiamante garantisce la capienza degli array. Restituisce i frame scritti.
+     * Reads from `buffer.position()` to `buffer.limit()` and writes into [left]/[right] starting at
+     * [offset]. Mono ends up identical on L and R; beyond two channels the first two are kept.
+     * The caller guarantees the arrays are large enough. Returns the frames written.
      *
-     * Nessun array temporaneo condiviso: lettura per indice assoluto, quindi thread-safe.
+     * No shared temporary array: reads by absolute index, hence thread-safe.
      */
     fun deinterleave(
         buffer: ByteBuffer,

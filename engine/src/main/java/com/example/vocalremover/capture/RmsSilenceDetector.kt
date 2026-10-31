@@ -1,15 +1,15 @@
 package com.example.vocalremover.capture
 
 /**
- * Rileva se un buffer di campioni PCM float è "silenzio" (RMS sotto
- * soglia). Usato dallo spike di cattura audio di sistema per distinguere
- * una sorgente che blocca la cattura (AudioPlaybackCaptureConfiguration
- * restituisce PCM a zero senza generare un errore di sistema) da una
- * sorgente che sta effettivamente inviando audio.
+ * Detects whether a buffer of float PCM samples is "silence" (RMS below
+ * threshold). Used by the system audio capture spike to tell apart
+ * a source that blocks capture (AudioPlaybackCaptureConfiguration
+ * returns zeroed PCM without raising a system error) from a
+ * source that is actually sending audio.
  */
 object RmsSilenceDetector {
 
-    /** Soglia RMS sotto la quale un buffer è considerato silenzio. */
+    /** RMS threshold below which a buffer is considered silence. */
     const val DEFAULT_THRESHOLD = 0.001f
 
     fun rms(samples: FloatArray): Float {

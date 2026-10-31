@@ -2,10 +2,10 @@ package com.example.vocalremover.decode
 
 import com.example.vocalremover.StereoPcm
 
-/** Ricampionamento lineare stereo, sufficiente per portare i file a 44,1 kHz prima del modello. */
+/** Linear stereo resampling, good enough to bring files to 44.1 kHz before the model. */
 internal object LinearResampler {
 
-    /** Restituisce la stessa istanza se le frequenze coincidono. */
+    /** Returns the same instance if the rates match. */
     fun resample(pcm: StereoPcm, fromRate: Int, toRate: Int): StereoPcm {
         if (fromRate == toRate) return pcm
 

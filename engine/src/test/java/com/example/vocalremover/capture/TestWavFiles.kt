@@ -4,7 +4,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-// Helper condivisi dai test dei WAV catturati (PCM 16 bit stereo).
+// Helpers shared by the captured WAV tests (16-bit stereo PCM).
 
 internal fun writePcm16StereoWav(file: File, interleaved: ShortArray, sampleRate: Int = 44100) {
     val writer = WavFileWriter(file, sampleRate = sampleRate, channelCount = 2)
@@ -12,7 +12,7 @@ internal fun writePcm16StereoWav(file: File, interleaved: ShortArray, sampleRate
     writer.close()
 }
 
-/** Cartella temporanea sotto build/, cancellata alla fine del blocco. */
+/** Temporary folder under build/, deleted at the end of the block. */
 internal fun withTempDir(block: (File) -> Unit) {
     val directory = File("build/test-wav/${System.nanoTime()}").apply { mkdirs() }
     try {
@@ -22,7 +22,7 @@ internal fun withTempDir(block: (File) -> Unit) {
     }
 }
 
-/** Ogni frame è riconoscibile: L = indice, R = -indice (troncati a Short). */
+/** Every frame is recognizable: L = index, R = -index (truncated to Short). */
 internal fun rampSamples(frames: Int): ShortArray = ShortArray(frames * 2) { i ->
     val frame = i / 2
     (if (i % 2 == 0) frame else -frame).toShort()

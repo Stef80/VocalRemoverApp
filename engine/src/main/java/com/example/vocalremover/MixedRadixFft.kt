@@ -5,14 +5,14 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * FFT complessa in-place per n = 2^k oppure n = 5·2^k (es. nFft=5120 = 5·1024 del modello MDX).
+ * In-place complex FFT for n = 2^k or n = 5·2^k (e.g. nFft=5120 = 5·1024 of the MDX model).
  *
- * Decimazione nel tempo in 5 sotto-FFT radix-2 da n/5 punti + butterfly radix-5, con tabelle
- * di bit-reversal e twiddle precomputate. Molto più economica di Bluestein, che per n=5120
- * richiede due FFT da 16384 punti per trasformata.
+ * Decimation in time into 5 radix-2 sub-FFTs of n/5 points + radix-5 butterfly, with precomputed
+ * bit-reversal and twiddle tables. Much cheaper than Bluestein, which for n=5120
+ * needs two 16384-point FFTs per transform.
  *
- * Convenzione: forward = exp(-2πi·kn/N); inverse = exp(+2πi·kn/N) scalata di 1/N.
- * Non thread-safe: usa un workspace interno.
+ * Convention: forward = exp(-2πi·kn/N); inverse = exp(+2πi·kn/N) scaled by 1/N.
+ * Not thread-safe: uses an internal workspace.
  */
 class MixedRadixFft(val n: Int) {
 
@@ -40,7 +40,7 @@ class MixedRadixFft(val n: Int) {
     private val subIm: FloatArray
 
     init {
-        require(supports(n)) { "MixedRadixFft supporta solo n = 2^k o 5·2^k (n=$n)" }
+        require(supports(n)) { "MixedRadixFft only supports n = 2^k or 5·2^k (n=$n)" }
         radix = if (n and (n - 1) == 0) 1 else 5
         m = n / radix
 
@@ -80,7 +80,7 @@ class MixedRadixFft(val n: Int) {
     }
 
     fun transform(re: FloatArray, im: FloatArray, inverse: Boolean = false) {
-        require(re.size >= n && im.size >= n) { "Buffer FFT troppo corti (n=$n)" }
+        require(re.size >= n && im.size >= n) { "FFT buffers too short (n=$n)" }
         if (radix == 1) {
             radix2(re, im, 0, inverse)
         } else {
@@ -162,7 +162,7 @@ class MixedRadixFft(val n: Int) {
         }
     }
 
-    /** FFT radix-2 in-place sul blocco [offset, offset+m) con tabelle precomputate. */
+    /** In-place radix-2 FFT on the block [offset, offset+m) with precomputed tables. */
     private fun radix2(re: FloatArray, im: FloatArray, offset: Int, inverse: Boolean) {
         val mm = m
         if (mm == 1) return

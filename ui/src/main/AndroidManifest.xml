@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Widget flottante per gestire la registrazione sopra altre app -->
+    <!-- Floating widget to manage recording on top of other apps -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
@@ -25,9 +25,9 @@
             </intent-filter>
         </activity>
 
-        <!-- taskAffinity vuota: avviata dal bubble con FLAG_ACTIVITY_NEW_TASK, apre un task
-             tutto suo invece di riportare in primo piano il task dell'app nascosto
-             (moveTaskToBack) e lasciarlo visibile alla sua chiusura. -->
+        <!-- Empty taskAffinity: started by the bubble with FLAG_ACTIVITY_NEW_TASK, it opens a task
+             of its own instead of bringing the app's hidden task to the foreground
+             (moveTaskToBack) and leaving it visible when it closes. -->
         <activity
             android:name="com.stef.vocalremover.ui.overlay.MediaProjectionConsentActivity"
             android:exported="false"

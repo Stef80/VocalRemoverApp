@@ -36,7 +36,7 @@ class BenchmarkMetricsTest {
     fun `stereo snr pools both channels`() {
         val l = floatArrayOf(1f, 1f)
         val r = floatArrayOf(1f, 1f)
-        // Errore solo su R (ampiezza 1): energia ref 4, errore 2 → 10·log10(2) dB
+        // Error only on R (amplitude 1): ref energy 4, error 2 → 10·log10(2) dB
         val snr = BenchmarkMetrics.stereoSnrDb(l, r, l.copyOf(), floatArrayOf(0f, 0f))
         assertEquals(10.0 * Math.log10(2.0), snr, 1e-9)
     }

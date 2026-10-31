@@ -12,23 +12,23 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.random.Random
 
-/** File audio generati per i test strumentati: seno a 440 Hz, ampiezza 0.5. */
+/** Audio files generated for instrumented tests: 440 Hz sine, amplitude 0.5. */
 object TestAudioFiles {
 
     private const val TONE_HZ = 440.0
     private const val AMPLITUDE = 0.5
 
-    /** PCM 16 bit con header WAV di 44 byte. */
+    /** 16-bit PCM with a 44-byte WAV header. */
     fun wav(dir: File, name: String, seconds: Double, sampleRate: Int = 44100, channels: Int = 2): File {
         val frames = (seconds * sampleRate).roundToInt()
         return writeWav(File(dir, name), pcm16(frames, sampleRate, channels), sampleRate, channels)
     }
 
-    /** WAV con header valido e nessun campione. */
+    /** WAV with a valid header and no samples. */
     fun emptyWav(dir: File, name: String): File =
         writeWav(File(dir, name), ShortArray(0), 44100, 2)
 
-    /** AAC-LC in contenitore MPEG-4, codificato con l'encoder del dispositivo. */
+    /** AAC-LC in an MPEG-4 container, encoded with the device encoder. */
     fun aac(dir: File, name: String, seconds: Double, sampleRate: Int, channels: Int): File {
         val file = File(dir, name).apply { delete() }
         val pcm = pcm16((seconds * sampleRate).roundToInt(), sampleRate, channels)
@@ -92,7 +92,7 @@ object TestAudioFiles {
         return file
     }
 
-    /** Byte casuali con estensione audio: nessun estrattore li riconosce. */
+    /** Random bytes with an audio extension: no extractor recognizes them. */
     fun garbage(dir: File, name: String): File =
         File(dir, name).apply { writeBytes(Random(42).nextBytes(4096)) }
 

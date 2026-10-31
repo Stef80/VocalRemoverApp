@@ -7,7 +7,7 @@
     android:padding="16dp"
     android:background="@color/background">
 
-    <!-- Titolo -->
+    <!-- Title -->
     <TextView
         android:id="@+id/tvTitle"
         android:layout_width="wrap_content"
@@ -21,7 +21,7 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="24dp" />
 
-    <!-- Pulsante selezione file -->
+    <!-- File selection button -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnPickFile"
         android:layout_width="0dp"
@@ -34,7 +34,7 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="32dp" />
 
-    <!-- Nome file selezionato -->
+    <!-- Selected file name -->
     <TextView
         android:id="@+id/tvFileName"
         android:layout_width="0dp"
@@ -50,7 +50,7 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="8dp" />
 
-    <!-- Barra di progresso elaborazione -->
+    <!-- Processing progress bar -->
     <ProgressBar
         android:id="@+id/progressBar"
         style="@style/Widget.AppCompat.ProgressBar.Horizontal"
@@ -64,7 +64,7 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="20dp" />
 
-    <!-- Stato elaborazione -->
+    <!-- Processing status -->
     <TextView
         android:id="@+id/tvStatus"
         android:layout_width="0dp"
@@ -78,7 +78,7 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="8dp" />
 
-    <!-- SeekBar riproduzione -->
+    <!-- Playback SeekBar -->
     <SeekBar
         android:id="@+id/seekBar"
         android:layout_width="0dp"
@@ -89,7 +89,7 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="32dp" />
 
-    <!-- Tempo corrente -->
+    <!-- Current time -->
     <TextView
         android:id="@+id/tvCurrentTime"
         android:layout_width="wrap_content"
@@ -101,7 +101,7 @@
         app:layout_constraintStart_toStartOf="parent"
         android:layout_marginTop="4dp" />
 
-    <!-- Durata totale -->
+    <!-- Total duration -->
     <TextView
         android:id="@+id/tvTotalTime"
         android:layout_width="wrap_content"
@@ -113,7 +113,7 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="4dp" />
 
-    <!-- Controlli riproduzione -->
+    <!-- Playback controls -->
     <LinearLayout
         android:id="@+id/layoutControls"
         android:layout_width="wrap_content"
@@ -148,7 +148,7 @@
 
     </LinearLayout>
 
-    <!-- Info tecnica -->
+    <!-- Technical info -->
     <TextView
         android:id="@+id/tvInfo"
         android:layout_width="0dp"

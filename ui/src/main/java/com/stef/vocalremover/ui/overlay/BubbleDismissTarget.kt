@@ -21,13 +21,13 @@ import androidx.compose.ui.unit.dp
 import com.example.vocalremover.ui.R
 import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 
-/** Dimensione massima della X: la finestra overlay la riserva sempre, così non cambia misura. */
+/** Maximum size of the X: the overlay window always reserves it, so its size does not change. */
 internal val BubbleDismissTargetMaxSize = 84.dp
 
 /**
- * Cerchio con la X mostrato in basso durante il trascinamento del bubble: rilasciando
- * il bubble sopra di esso il widget viene chiuso. Si ingrandisce quando il bubble è
- * abbastanza vicino da essere chiuso al rilascio.
+ * Circle with the X shown at the bottom while dragging the bubble: releasing
+ * the bubble over it closes the widget. It grows when the bubble is
+ * close enough to be closed on release.
  */
 @Composable
 fun BubbleDismissTarget(hovering: Boolean, modifier: Modifier = Modifier) {

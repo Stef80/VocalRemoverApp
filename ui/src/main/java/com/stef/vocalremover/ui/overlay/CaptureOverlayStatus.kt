@@ -5,11 +5,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Stato condiviso in-process che riflette se il widget flottante sta
- * attualmente registrando. `BubbleOverlayService` è l'unico scrittore (aggiorna
- * questo stato ad ogni transizione di fase); altre schermate come
- * `ImportSongScreen` lo osservano in sola lettura per riflettere lo stato della
- * registrazione senza dover parlare direttamente con il servizio o con
+ * In-process shared state reflecting whether the floating widget is
+ * currently recording. `BubbleOverlayService` is the only writer (it updates
+ * this state on every stage transition); other screens such as
+ * `ImportSongScreen` observe it read-only to reflect the recording
+ * state without having to talk directly to the service or to
  * `SystemAudioCaptureService`.
  */
 object CaptureOverlayStatus {

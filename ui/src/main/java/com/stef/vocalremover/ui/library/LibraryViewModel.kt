@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Legge la libreria quando la schermata lo chiede (a ogni ritorno in primo piano). */
+/** Reads the library when the screen asks (every time it comes back to the foreground). */
 class LibraryViewModel(
     private val repository: LibraryRepository,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -39,7 +39,7 @@ class LibraryViewModel(
 
     private var refreshJob: Job? = null
 
-    /** Azione rifiutata da MediaStore in attesa del consenso dell'utente. */
+    /** Action rejected by MediaStore pending user consent. */
     private var awaitingConsent: Edit? = null
 
     private sealed interface Edit {
@@ -49,8 +49,8 @@ class LibraryViewModel(
     }
 
     /**
-     * Rilegge la libreria; annulla una lettura ancora in corso (vince l'ultima). Durante le letture
-     * successive alla prima lo stato resta quello attuale, senza tornare a `Loading`.
+     * Reads the library again; cancels a read still in progress (the last one wins). During reads
+     * after the first one the state stays the current one, without going back to `Loading`.
      */
     fun refresh() {
         refreshJob?.cancel()
@@ -67,14 +67,14 @@ class LibraryViewModel(
                     if (tracks.isEmpty()) LibraryUiState.Empty else LibraryUiState.Tracks(tracks)
                 },
                 onFailure = { error ->
-                    Log.w(TAG, "Lettura della libreria non riuscita", error)
+                    Log.w(TAG, "Reading the library failed", error)
                     LibraryUiState.Error
                 },
             )
         }
     }
 
-    /** Titolo vuoto o che non cambierebbe il nome del file: non fa nulla. */
+    /** Empty title, or one that would not change the file name: does nothing. */
     fun rename(track: LibraryTrack, title: String) {
         val trimmed = title.trim()
         if (trimmed.isEmpty() || RecordingFileNaming.sanitize(trimmed) == track.title) return
@@ -83,7 +83,7 @@ class LibraryViewModel(
 
     fun delete(track: LibraryTrack) = perform(Edit.Delete(track.uri), canAskConsent = true)
 
-    /** Risposta alla finestra di `LibraryEvent.ConsentRequired`: riprova una sola volta. */
+    /** Answer to the `LibraryEvent.ConsentRequired` dialog: retries only once. */
     fun onConsentResult(granted: Boolean) {
         val edit = awaitingConsent ?: return
         awaitingConsent = null
@@ -102,7 +102,7 @@ class LibraryViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "Modifica della libreria non riuscita", e)
+                Log.w(TAG, "Library change failed", e)
                 null
             }
             when {
@@ -119,7 +119,7 @@ class LibraryViewModel(
                     awaitingConsent = edit
                     _events.send(LibraryEvent.ConsentRequired(result.intentSender))
                 }
-                // Errore, oppure consenso chiesto di nuovo dopo averlo già dato.
+                // Error, or consent asked again after it was already given.
                 else -> _events.send(
                     when (edit) {
                         is Edit.Rename -> LibraryEvent.RenameFailed

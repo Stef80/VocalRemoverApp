@@ -5,18 +5,18 @@ import com.example.vocalremover.playback.LibraryPlayer
 import com.example.vocalremover.playback.PlayerState
 import kotlinx.coroutines.flow.StateFlow
 
-/** Anteprima audio di editor e schermata Import; interfaccia per poter testare il ViewModel. */
+/** Audio preview of the editor and the Import screen; an interface so the ViewModel can be tested. */
 interface PreviewPlayer {
     val state: StateFlow<PlayerState>
     fun play(uri: Uri)
     fun pause()
     fun seekTo(positionMs: Long)
-    /** Scarica il brano: il prossimo play() lo ricarica dal file. */
+    /** Unloads the track: the next play() reloads it from the file. */
     fun stop()
     fun release()
 }
 
-/** Solo main thread, come [LibraryPlayer]. */
+/** Main thread only, like [LibraryPlayer]. */
 class LibraryPreviewPlayer(private val player: LibraryPlayer) : PreviewPlayer {
     override val state: StateFlow<PlayerState> get() = player.state
     override fun play(uri: Uri) = player.play(uri)

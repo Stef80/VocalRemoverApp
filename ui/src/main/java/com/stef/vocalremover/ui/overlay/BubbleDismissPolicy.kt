@@ -1,24 +1,24 @@
 package com.stef.vocalremover.ui.overlay
 
 /**
- * Regole pure (nessuna dipendenza Android) per la chiusura del bubble trascinandolo
- * sulla X in basso. `BubbleOverlayService` le usa per decidere se mostrare la X e
- * cosa fare al rilascio.
+ * Pure rules (no Android dependencies) for closing the bubble by dragging it
+ * onto the X at the bottom. `BubbleOverlayService` uses them to decide whether to show the X and
+ * what to do on release.
  */
 object BubbleDismissPolicy {
 
     /**
-     * Durante la registrazione (e il suo arresto) la X non compare: un trascinamento
-     * sbagliato non deve far perdere il brano. Per chiudere si ferma prima la registrazione.
+     * During recording (and while it stops) the X does not appear: a wrong
+     * drag must not lose the track. To close, stop the recording first.
      */
     fun canDismiss(phase: BubbleOverlayPhase): Boolean =
         phase != BubbleOverlayPhase.RECORDING && phase != BubbleOverlayPhase.STOPPING
 
-    /** In ascolto c'è una cattura attiva da annullare prima di chiudere il servizio. */
+    /** While listening there is an active capture to cancel before closing the service. */
     fun mustCancelCapture(phase: BubbleOverlayPhase): Boolean =
         phase == BubbleOverlayPhase.LISTENING || phase == BubbleOverlayPhase.CANCELLING
 
-    /** True se il centro del bubble è entro `radius` dal centro della X (coordinate schermo, px). */
+    /** True if the bubble center is within `radius` of the X center (screen coordinates, px). */
     fun isOverTarget(
         bubbleCenterX: Float,
         bubbleCenterY: Float,

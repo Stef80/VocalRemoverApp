@@ -1,6 +1,11 @@
 package com.stef.vocalremover.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +19,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -21,6 +27,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,6 +36,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -36,12 +45,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import com.example.vocalremover.playback.PlayerError
 import com.example.vocalremover.ui.R
+import com.stef.vocalremover.ui.player.PlayerLyrics
 import com.stef.vocalremover.ui.player.PlayerUiState
 import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 
 /**
- * Player di un brano della Libreria. `<<` e `>>` spostano di 10 secondi; la freccia e il tasto
- * indietro di sistema tornano alla Libreria.
+ * Player of a Library track. `<<` and `>>` skip by 10 seconds; the arrow and the system
+ * back key go back to the Library.
  */
 @Composable
 fun PlayerScreen(
@@ -143,13 +153,9 @@ fun PlayerScreen(
                 shape = RoundedCornerShape(20.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLow
             ) {
-                Text(
-                    text = sampleLyrics,
-                    modifier = Modifier
-                        .padding(20.dp)
-                        .verticalScroll(rememberScrollState()),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface
+                LyricsPanel(
+                    lyrics = state?.lyrics ?: PlayerLyrics.Unavailable,
+                    positionMs = state?.positionMs ?: 0L,
                 )
             }
             Spacer(Modifier.height(12.dp))
@@ -158,7 +164,75 @@ fun PlayerScreen(
     }
 }
 
-/** Barra trascinabile: durante il trascinamento mostra la posizione scelta, la applica al rilascio. */
+/** Track lyrics: spinner during the download, then synced lines or plain text. */
+@Composable
+private fun LyricsPanel(lyrics: PlayerLyrics, positionMs: Long) {
+    when (lyrics) {
+        PlayerLyrics.Loading -> Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            CircularProgressIndicator()
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = stringResource(R.string.player_lyrics_wait),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        is PlayerLyrics.Synced -> SyncedLyrics(lyrics, positionMs)
+        is PlayerLyrics.Plain -> Text(
+            text = lyrics.text,
+            modifier = Modifier
+                .padding(20.dp)
+                .verticalScroll(rememberScrollState()),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        PlayerLyrics.Instrumental, PlayerLyrics.Unavailable -> Box(
+            modifier = Modifier.fillMaxSize().padding(20.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = stringResource(
+                    if (lyrics == PlayerLyrics.Instrumental) R.string.player_lyrics_instrumental
+                    else R.string.player_lyrics_unavailable
+                ),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/** Synced lines: the current one is highlighted and the list follows it. */
+@Composable
+private fun SyncedLyrics(lyrics: PlayerLyrics.Synced, positionMs: Long) {
+    val active = lyrics.activeLine(positionMs)
+    val listState = rememberLazyListState()
+    LaunchedEffect(active) {
+        if (active >= 0) listState.animateScrollToItem((active - 2).coerceAtLeast(0))
+    }
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(20.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        itemsIndexed(lyrics.lines) { index, line ->
+            Text(
+                text = line,
+                style = if (index == active) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge,
+                fontWeight = if (index == active) FontWeight.Bold else FontWeight.Normal,
+                color = if (index == active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Draggable bar: while dragging it shows the chosen position, applies it on release. */
 @Composable
 private fun PlaybackProgress(state: PlayerUiState?, onSeek: (Long) -> Unit) {
     val durationMs = state?.durationMs ?: 0L
@@ -173,7 +247,7 @@ private fun PlaybackProgress(state: PlayerUiState?, onSeek: (Long) -> Unit) {
                 dragPositionMs?.let(onSeek)
                 dragPositionMs = null
             },
-            enabled = durationMs > 0,
+            enabled = durationMs > 0 && state?.lyrics != PlayerLyrics.Loading,
             modifier = Modifier
                 .fillMaxWidth()
                 .semantics { contentDescription = seekDescription }
@@ -208,28 +282,6 @@ private fun PlaybackProgress(state: PlayerUiState?, onSeek: (Long) -> Unit) {
     }
 }
 
-private const val sampleLyrics = """
-Questo e lo spazio dedicato ai testi della canzone.
-
-Qui puoi mostrare strofa, ritornello, bridge e outro.
-La card e volutamente ampia e scorrevole per testi lunghi.
-
-Strofa 1
-Parole della canzone riga 1
-Parole della canzone riga 2
-Parole della canzone riga 3
-
-Ritornello
-Parole del ritornello riga 1
-Parole del ritornello riga 2
-Parole del ritornello riga 3
-
-Strofa 2
-Parole della canzone riga 1
-Parole della canzone riga 2
-Parole della canzone riga 3
-"""
-
 @Preview(showBackground = true)
 @Composable
 private fun PlayerScreenPreview() {
@@ -241,6 +293,11 @@ private fun PlayerScreenPreview() {
                 positionMs = 74_000L,
                 durationMs = 222_000L,
                 error = null,
+                lyrics = PlayerLyrics.Synced(
+                    lines = listOf("Prima riga", "Seconda riga", "Terza riga"),
+                    startsMs = listOf(60_000L, 70_000L, 80_000L),
+                    songOffsetMs = 0L,
+                ),
             )
         )
     }

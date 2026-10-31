@@ -117,7 +117,7 @@ fun ImportSongScreen(
     val context = LocalContext.current
     val overlayPermissionMessage = stringResource(R.string.import_overlay_permission_required)
     val captureRequiresAndroid10Message = stringResource(R.string.import_capture_requires_android_10)
-    // Selettore di sistema come nel caricamento da file di `:engine`: nessun permesso storage richiesto.
+    // System picker as in `:engine`'s file loading: no storage permission required.
     val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let(onPickFile)
     }
@@ -130,9 +130,9 @@ fun ImportSongScreen(
             }
         } else if (BubbleOverlayService.canShowOverlay(context)) {
             ContextCompat.startForegroundService(context, Intent(context, BubbleOverlayService::class.java))
-            // Nasconde l'app (senza chiuderla) così resta visibile solo il bubble sopra
-            // la home o l'app da registrare. moveTaskToBack mantiene viva l'Activity, che
-            // il bubble riporta in primo piano a fine registrazione (FLAG_ACTIVITY_SINGLE_TOP).
+            // Hides the app (without closing it) so only the bubble stays visible on top of
+            // the home screen or the app to record. moveTaskToBack keeps the Activity alive, and
+            // the bubble brings it back to the foreground when recording ends (FLAG_ACTIVITY_SINGLE_TOP).
             context.findActivity()?.moveTaskToBack(true)
         } else {
             scope.launch {
@@ -142,9 +142,9 @@ fun ImportSongScreen(
             context.startActivity(BubbleOverlayService.overlayPermissionSettingsIntent(context))
         }
     }
-    // Riflette lo stato del widget flottante (unico scrittore: BubbleOverlayService),
-    // per poter avviare/fermare la stessa sessione di cattura anche da qui invece di
-    // dover per forza interagire con il bubble.
+    // Mirrors the state of the floating widget (single writer: BubbleOverlayService),
+    // so the same capture session can be started/stopped from here too instead of
+    // having to interact with the bubble.
     val isRecording by CaptureOverlayStatus.isRecording.collectAsState()
     val stopCaptureWidget: () -> Unit = {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -180,7 +180,7 @@ fun ImportSongScreen(
                 is ImportUiState.CaptureReady ->
                     PendingCaptureCard(state.name, state.isTrimmed, enabled = true, onEdit = onEdit, onDiscard = onDiscard)
                 is ImportUiState.Processing -> if (state.fromFile) {
-                    // Durante l'elaborazione di un file la cattura non si avvia: il processore è occupato.
+                    // While a file is being processed the capture does not start: the processor is busy.
                     CaptureCard(isRecording, enabled = false, onStart = startCaptureWidget, onStop = stopCaptureWidget)
                 } else {
                     PendingCaptureCard(state.name, isTrimmed = false, enabled = false, onEdit = onEdit, onDiscard = onDiscard)
@@ -194,7 +194,7 @@ fun ImportSongScreen(
             ProcessingOptions(options = options, onOptionsChange = { options = it })*/
             Spacer(Modifier.height(24.dp))
             Button(
-                // Elabora la cattura in attesa; un file scelto dalla memoria parte da solo.
+                // Processes the pending capture; a file picked from storage starts on its own.
                 onClick = onProcess,
                 enabled = state is ImportUiState.CaptureReady,
                 modifier = Modifier

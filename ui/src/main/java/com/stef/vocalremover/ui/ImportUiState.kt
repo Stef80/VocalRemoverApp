@@ -3,7 +3,7 @@ package com.stef.vocalremover.ui
 import android.net.Uri
 import com.example.vocalremover.processing.ProcessingError
 
-/** Stato della schermata Import rispetto alla cattura in attesa o al file scelto dalla memoria. */
+/** State of the Import screen for the pending capture or the file picked from storage. */
 sealed interface ImportUiState {
     data object Empty : ImportUiState
     data class CaptureReady(
@@ -12,7 +12,7 @@ sealed interface ImportUiState {
         val durationMs: Long,
         val isTrimmed: Boolean,
     ) : ImportUiState
-    /** [fromFile]: si sta elaborando un file scelto con «Sfoglia memoria», non la cattura. */
+    /** [fromFile]: a file picked with «Sfoglia memoria» is being processed, not the capture. */
     data class Processing(
         val name: String,
         val phase: ProcessingPhase,
@@ -20,17 +20,17 @@ sealed interface ImportUiState {
     ) : ImportUiState
 }
 
-/** Fasi mostrate dalla progress bar, da `SongProcessor.state`. */
+/** Stages shown by the progress bar, from `SongProcessor.state`. */
 sealed interface ProcessingPhase {
     data object Decoding : ProcessingPhase
     data class Running(val percent: Int) : ProcessingPhase
     data object Saving : ProcessingPhase
 }
 
-/** Stato dell'editor di taglio; tempi in ms rispetto alla cattura originale. */
+/** State of the trim editor; times in ms relative to the original capture. */
 data class EditorUiState(
     val name: String,
-    /** null mentre si calcolano. */
+    /** null while they are being computed. */
     val peaks: FloatArray?,
     val durationMs: Long,
     val startMs: Long,
@@ -40,7 +40,7 @@ data class EditorUiState(
     val isSaving: Boolean,
     val previewAvailable: Boolean,
 ) {
-    // FloatArray non ha equals strutturale: lo si confronta per contenuto.
+    // FloatArray has no structural equals: it is compared by content.
     override fun equals(other: Any?): Boolean =
         other is EditorUiState &&
             name == other.name &&
@@ -67,7 +67,7 @@ data class EditorUiState(
     }
 }
 
-/** Esiti una tantum, mostrati come snackbar (testi in strings.xml). */
+/** One-off outcomes, shown as snackbars (texts in strings.xml). */
 sealed interface ImportEvent {
     data object EditSaved : ImportEvent
     data object EditFailed : ImportEvent

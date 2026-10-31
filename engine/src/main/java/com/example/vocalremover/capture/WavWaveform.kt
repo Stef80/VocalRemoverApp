@@ -6,14 +6,14 @@ import java.io.IOException
 import kotlin.math.abs
 import kotlin.math.max
 
-/** Picchi per disegnare la forma d'onda di un WAV PCM 16 bit stereo, letti in streaming. */
+/** Peaks to draw the waveform of a 16-bit stereo PCM WAV, read by streaming. */
 object WavWaveform {
 
     private const val READ_BUFFER_BYTES = 64 * 1024
 
     /**
-     * Bloccante. Restituisce `min(buckets, frameCount)` valori 0–1: per ogni blocco di frame il
-     * massimo di |L| e |R|.
+     * Blocking. Returns `min(buckets, frameCount)` values 0–1: for each block of frames the
+     * maximum of |L| and |R|.
      */
     fun peaks(file: File, buckets: Int): FloatArray {
         require(buckets > 0) { "buckets deve essere positivo: $buckets" }
@@ -44,7 +44,7 @@ object WavWaveform {
         return peaks
     }
 
-    /** Come InputStream.readNBytes, che su Android esiste solo da API 33. */
+    /** Like InputStream.readNBytes, which on Android exists only since API 33. */
     private fun readFully(input: BufferedInputStream, buffer: ByteArray): Int {
         var total = 0
         while (total < buffer.size) {

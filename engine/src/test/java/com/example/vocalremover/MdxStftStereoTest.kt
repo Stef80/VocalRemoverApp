@@ -42,7 +42,7 @@ class MdxStftStereoTest {
     private fun assertInverseStereoMatchesPerChannel(nFft: Int, hop: Int, frames: Int, length: Int, delta: Float) {
         val reference = MdxStftProcessor(nFft, hop, nFft / 2)
         val bins = reference.freqBins
-        // Spettri arbitrari, anche con immaginario non nullo su DC e Nyquist.
+        // Arbitrary spectra, including non-zero imaginary parts on DC and Nyquist.
         val lRe = randomSignal(frames * bins, seed = 3)
         val lIm = randomSignal(frames * bins, seed = 4)
         val rRe = randomSignal(frames * bins, seed = 5)

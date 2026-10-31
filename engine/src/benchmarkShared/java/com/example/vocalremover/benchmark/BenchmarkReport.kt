@@ -2,7 +2,7 @@ package com.example.vocalremover.benchmark
 
 import java.util.Locale
 
-/** Risultato di un benchmark su un dispositivo, serializzato in una riga JSON. */
+/** Result of a benchmark on one device, serialized as a single JSON line. */
 data class BenchmarkReport(
     val manufacturer: String,
     val model: String,
@@ -18,7 +18,7 @@ data class BenchmarkReport(
     val passed: Boolean,
     val failure: String?
 ) {
-    /** Secondi di elaborazione per secondo di audio (< 1 = più veloce del tempo reale). */
+    /** Seconds of processing per second of audio (< 1 = faster than real time). */
     val realtimeFactor: Double get() = processMs / 1000.0 / audioSeconds
 
     fun toJson(): String = buildString {

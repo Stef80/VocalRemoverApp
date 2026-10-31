@@ -9,36 +9,91 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.vocalremover.capture.RecordingFileNaming
 import com.example.vocalremover.library.LibraryTrack
+import com.example.vocalremover.lyrics.LyricsStatus
+import com.example.vocalremover.lyrics.TrackLyrics
+import com.example.vocalremover.lyrics.TrackLyricsRepository
 import com.example.vocalremover.playback.LibraryPlayer
 import com.example.vocalremover.playback.PlayerError
 import com.stef.vocalremover.ui.LibraryPreviewPlayer
 import com.stef.vocalremover.ui.PreviewPlayer
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-/** Brano aperto nel player e stato della sua riproduzione. */
+/** Track open in the player and its playback state. */
 data class PlayerUiState(
     val track: LibraryTrack,
     val isPlaying: Boolean,
     val positionMs: Long,
-    /** Quella di ExoPlayer appena nota, prima quella della libreria (0 = sconosciuta). */
+    /** ExoPlayer's as soon as it is known, before that the library's (0 = unknown). */
     val durationMs: Long,
     val error: PlayerError?,
+    val lyrics: PlayerLyrics = PlayerLyrics.Unavailable,
 )
 
-/** Player dei brani della Libreria. Va usato dal main thread, come [LibraryPlayer]. */
-class PlayerViewModel(private val player: PreviewPlayer) : ViewModel() {
+/** Lyrics shown in the player. */
+sealed interface PlayerLyrics {
+    /** Download still in progress: the track does not start until it finishes. */
+    data object Loading : PlayerLyrics
+    /**
+     * Lines with their time in the track; [songOffsetMs] is the position in the track at the start of the file
+     * (active line = the one with `startMs - songOffsetMs <= position`).
+     */
+    data class Synced(val lines: List<String>, val startsMs: List<Long>, val songOffsetMs: Long) : PlayerLyrics {
+        /** Index of the line to highlight, -1 before the first one. */
+        fun activeLine(positionMs: Long): Int =
+            startsMs.indexOfLast { it - songOffsetMs <= positionMs }
+    }
+    data class Plain(val text: String) : PlayerLyrics
+    data object Instrumental : PlayerLyrics
+    /** No lyrics: imported track, not found or permanent error. */
+    data object Unavailable : PlayerLyrics
+
+    companion object {
+        /** `null` = lyrics file still pending ([LyricsStatus.PENDING]). */
+        fun from(stored: TrackLyrics?): PlayerLyrics? = when (stored?.status) {
+            null -> Unavailable
+            LyricsStatus.PENDING -> null
+            LyricsStatus.INSTRUMENTAL -> Instrumental
+            LyricsStatus.NOT_FOUND, LyricsStatus.FAILED -> Unavailable
+            LyricsStatus.FOUND -> when {
+                stored.lines.isNotEmpty() -> Synced(
+                    lines = stored.lines.map { it.text },
+                    startsMs = stored.lines.map { it.startMs },
+                    songOffsetMs = stored.track.songOffsetMs ?: 0L,
+                )
+                !stored.plainText.isNullOrBlank() -> Plain(stored.plainText!!)
+                else -> Unavailable
+            }
+        }
+    }
+}
+
+/** Player of the Library tracks. Must be used from the main thread, like [LibraryPlayer]. */
+class PlayerViewModel(
+    private val player: PreviewPlayer,
+    /** Blocking (I/O): read on [ioDispatcher]. */
+    private val loadLyrics: (Uri) -> TrackLyrics? = { null },
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModel() {
 
     private val track = MutableStateFlow<LibraryTrack?>(null)
+    private val lyrics = MutableStateFlow<PlayerLyrics>(PlayerLyrics.Unavailable)
+    private var lyricsJob: Job? = null
 
-    /** `null` finché non si apre un brano (o dopo che il brano aperto è stato eliminato). */
-    val state: StateFlow<PlayerUiState?> = combine(track, player.state) { track, playback ->
+    /** `null` until a track is opened (or after the open track has been deleted). */
+    val state: StateFlow<PlayerUiState?> = combine(track, player.state, lyrics) { track, playback, lyrics ->
         track ?: return@combine null
-        // Lo stato di un altro Uri (brano precedente non ancora scaricato) non conta.
+        // The state of another Uri (previous track not yet unloaded) does not count.
         val current = playback.takeIf { it.currentUri == track.uri }
         PlayerUiState(
             track = track,
@@ -46,23 +101,41 @@ class PlayerViewModel(private val player: PreviewPlayer) : ViewModel() {
             positionMs = current?.positionMs ?: 0L,
             durationMs = current?.durationMs?.takeIf { it > 0 } ?: track.durationMs,
             error = current?.error,
+            lyrics = lyrics,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    /** Apre il brano e lo riproduce da capo, anche se era già quello aperto. */
+    /**
+     * Opens the track and plays it from the start, even if it was already the open one. If the lyrics are still
+     * downloading, playback starts only when the download finishes (with or without lyrics).
+     */
     fun open(track: LibraryTrack) {
+        lyricsJob?.cancel()
         this.track.value = track
+        lyrics.value = PlayerLyrics.Loading
         player.stop()
-        player.play(track.uri)
+        lyricsJob = viewModelScope.launch {
+            while (true) {
+                val loaded = PlayerLyrics.from(withContext(ioDispatcher) { loadLyrics(track.uri) })
+                if (loaded != null) {
+                    lyrics.value = loaded
+                    player.play(track.uri)
+                    return@launch
+                }
+                delay(LYRICS_POLL_MS)
+            }
+        }
     }
 
     fun togglePlayback() {
         val current = state.value ?: return
+        if (current.lyrics == PlayerLyrics.Loading) return
         if (current.isPlaying) player.pause() else player.play(current.track.uri)
     }
 
     fun play() {
         val current = state.value ?: return
+        if (current.lyrics == PlayerLyrics.Loading) return
         player.play(current.track.uri)
     }
 
@@ -72,6 +145,7 @@ class PlayerViewModel(private val player: PreviewPlayer) : ViewModel() {
 
     fun seekTo(positionMs: Long) {
         val current = state.value ?: return
+        if (current.lyrics == PlayerLyrics.Loading) return
         player.seekTo(clamp(positionMs, current.durationMs))
     }
 
@@ -79,17 +153,19 @@ class PlayerViewModel(private val player: PreviewPlayer) : ViewModel() {
 
     fun forward() = seekBy(SKIP_MS)
 
-    /** Uscendo dal player la musica si ferma: nella Libreria non ci sono controlli. */
+    /** Leaving the player stops the music: there are no controls in the Library. */
     fun leave() = pause()
 
     fun onTrackDeleted(uri: Uri) {
         if (track.value?.uri != uri) return
+        lyricsJob?.cancel()
         player.stop()
         track.value = null
+        lyrics.value = PlayerLyrics.Unavailable
     }
 
     fun onTrackRenamed(uri: Uri, title: String) {
-        // Lo stesso titolo che la libreria ricaverà dal nuovo nome del file.
+        // The same title the library will derive from the new file name.
         track.update { if (it?.uri == uri) it.copy(title = RecordingFileNaming.sanitize(title)) else it }
     }
 
@@ -99,6 +175,7 @@ class PlayerViewModel(private val player: PreviewPlayer) : ViewModel() {
 
     private fun seekBy(deltaMs: Long) {
         val current = state.value ?: return
+        if (current.lyrics == PlayerLyrics.Loading) return
         player.seekTo(clamp(current.positionMs + deltaMs, current.durationMs))
     }
 
@@ -109,10 +186,14 @@ class PlayerViewModel(private val player: PreviewPlayer) : ViewModel() {
 
     companion object {
         private const val SKIP_MS = 10_000L
+        /** How often the lyrics file is checked again while the download is in progress. */
+        internal const val LYRICS_POLL_MS = 1_000L
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                PlayerViewModel(LibraryPreviewPlayer(LibraryPlayer(checkNotNull(this[APPLICATION_KEY]))))
+                val app = checkNotNull(this[APPLICATION_KEY])
+                val repository = TrackLyricsRepository.create(app)
+                PlayerViewModel(LibraryPreviewPlayer(LibraryPlayer(app)), loadLyrics = repository::get)
             }
         }
     }

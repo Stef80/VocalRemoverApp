@@ -64,16 +64,16 @@ fun BubbleOverlayContent(
     onStopRecording: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Il widget si apre espanso: il primo passo è sempre scegliere l'app da registrare.
+    // The widget opens expanded: the first step is always picking the app to record.
     var expanded by rememberSaveable { mutableStateOf(true) }
     val isRecording = state.phase == BubbleOverlayPhase.RECORDING
     val isListening = state.phase == BubbleOverlayPhase.LISTENING
 
     if (!expanded) {
-        // Durante la registrazione pulsa un anello rosso attorno al bubble e un
-        // pallino rosso in alto a destra, per segnalare all'utente che la cattura
-        // è in corso anche quando il widget è collassato sopra un'altra app.
-        // In ascolto pulsa solo l'anello, nel colore terziario del tema.
+        // During recording a red ring pulses around the bubble along with a
+        // red dot at the top right, to tell the user that the capture
+        // is in progress even when the widget is collapsed over another app.
+        // While listening only the ring pulses, in the theme's tertiary color.
         val pulseTransition = rememberInfiniteTransition(label = "bubble-recording-pulse")
         val pulseAlpha by pulseTransition.animateFloat(
             initialValue = 0.35f,
@@ -104,9 +104,9 @@ fun BubbleOverlayContent(
                     }
                 }
         ) {
-            // Fumetto solo informativo (non cliccabile), sopra il bubble e staccato
-            // dall'anello/pallino della registrazione. Il suo spazio resta sempre
-            // riservato (invisibile quando non serve), così il bubble non si sposta.
+            // Informational bubble only (not clickable), above the bubble and detached
+            // from the recording ring/dot. Its space is always
+            // reserved (invisible when not needed), so the bubble does not move.
             RecordHintBalloon(
                 text = hintText ?: stringResource(R.string.bubble_hint_record),
                 modifier = Modifier
@@ -129,9 +129,9 @@ fun BubbleOverlayContent(
                                 Modifier
                             }
                         )
-                        // Tap: con un'app scelta avvia l'ascolto, in ascolto lo annulla,
-                        // durante la registrazione la ferma, altrimenti riapre la card.
-                        // Click lungo: riapre sempre la card (es. per cambiare app).
+                        // Tap: with an app picked it starts listening, while listening it cancels,
+                        // during recording it stops, otherwise it reopens the card.
+                        // Long click: always reopens the card (e.g. to change app).
                         .combinedClickable(
                             onClick = {
                                 when (state.phase) {
@@ -184,7 +184,7 @@ fun BubbleOverlayContent(
     )
 }
 
-/** Fumetto con la punta in basso a sinistra, rivolta verso il bubble. */
+/** Speech bubble with the tip at the bottom left, pointing at the bubble. */
 @Composable
 private fun RecordHintBalloon(text: String, modifier: Modifier = Modifier) {
     val balloonColor = MaterialTheme.colorScheme.error
@@ -265,11 +265,11 @@ private fun BubbleOverlayExpandedCard(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .clickable(
-                                // Deve coincidere esattamente con le fasi accettate da
+                                // Must match exactly the stages accepted by
                                 // BubbleOverlayTransitions.selectApp (IDLE/APP_SELECTED/ERROR):
-                                // altrove la transizione è rifiutata (ritorna null), quindi
-                                // abilitare il tap farebbe comunque partire launchTargetApp
-                                // con un pacchetto diverso da quello registrato nello stato.
+                                // elsewhere the transition is rejected (returns null), so
+                                // enabling the tap would still trigger launchTargetApp
+                                // with a package different from the one recorded in the state.
                                 enabled = state.phase == BubbleOverlayPhase.IDLE ||
                                     state.phase == BubbleOverlayPhase.APP_SELECTED ||
                                     state.phase == BubbleOverlayPhase.ERROR
@@ -290,8 +290,8 @@ private fun BubbleOverlayExpandedCard(
                 }
             }
 
-            // L'avvio della registrazione passa dal bubble collassato: qui restano solo
-            // lo stop (in registrazione) e l'annullamento (in ascolto).
+            // Recording starts from the collapsed bubble: only the stop (while recording)
+            // and the cancel (while listening) remain here.
             if (state.phase == BubbleOverlayPhase.RECORDING ||
                 state.phase == BubbleOverlayPhase.LISTENING
             ) {

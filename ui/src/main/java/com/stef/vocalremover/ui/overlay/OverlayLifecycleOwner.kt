@@ -10,9 +10,9 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 
 /**
- * Owner minimale per ospitare una ComposeView dentro una finestra overlay
- * creata da un Service. La view non è agganciata alla gerarchia di un'Activity,
- * quindi dobbiamo fornirle manualmente lifecycle, ViewModelStore e saved state.
+ * Minimal owner to host a ComposeView inside an overlay window
+ * created by a Service. The view is not attached to an Activity's hierarchy,
+ * so we must provide its lifecycle, ViewModelStore and saved state manually.
  */
 class OverlayLifecycleOwner : LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
     private val lifecycleRegistry = LifecycleRegistry(this)

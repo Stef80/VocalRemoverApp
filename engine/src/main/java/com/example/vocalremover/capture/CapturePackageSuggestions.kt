@@ -1,21 +1,21 @@
 package com.example.vocalremover.capture
 
 /**
- * Logica pura (nessuna dipendenza Android) per ordinare e decodificare i
- * suggerimenti di pacchetto usati dal picker delle app sorgente, condivisa
- * tra la vecchia schermata XML (`MainActivity`) e il widget flottante
- * (`BubbleOverlayService`), per evitare di duplicare l'ordinamento in due posti.
+ * Pure logic (no Android dependencies) to sort and decode the
+ * package suggestions used by the source app picker, shared
+ * between the old XML screen (`MainActivity`) and the floating widget
+ * (`BubbleOverlayService`), so the sorting is not duplicated in two places.
  */
 object CapturePackageSuggestions {
 
     /**
-     * Ordina i pacchetti candidati mettendo prima i più recenti (nell'ordine
-     * in cui sono stati usati), poi il resto in ordine alfabetico per etichetta.
+     * Sorts the candidate packages putting the most recent first (in the order
+     * they were used), then the rest alphabetically by label.
      *
-     * @param recentPackages nomi di pacchetto usati di recente, dal più recente al meno recente
-     * @param candidates mappa packageName -> testo da mostrare nel picker
-     *        (es. "YouTube (com.google.android.youtube)", o solo il packageName
-     *        se l'etichetta coincide col nome del pacchetto)
+     * @param recentPackages recently used package names, from most to least recent
+     * @param candidates map packageName -> text to show in the picker
+     *        (e.g. "YouTube (com.google.android.youtube)", or just the packageName
+     *        if the label matches the package name)
      */
     fun orderedDisplayTexts(
         recentPackages: List<String>,
@@ -32,9 +32,9 @@ object CapturePackageSuggestions {
             .mapNotNull { candidates[it] }
 
     /**
-     * Estrae il nome del pacchetto dal testo mostrato nel picker. Se il testo
-     * contiene "(packageName)" lo estrae da lì (etichetta diversa dal
-     * packageName), altrimenti il testo stesso è già il nome del pacchetto.
+     * Extracts the package name from the text shown in the picker. If the text
+     * contains "(packageName)" it is extracted from there (label different from the
+     * packageName), otherwise the text itself is already the package name.
      */
     fun packageNameFromDisplayText(displayText: String): String =
         displayText.substringAfterLast("(").trimEnd(')')

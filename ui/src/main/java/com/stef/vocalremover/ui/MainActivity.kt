@@ -27,29 +27,29 @@ import com.stef.vocalremover.ui.player.PlayerViewModel
 import com.stef.vocalremover.ui.theme.VocalRemoverTheme
 import kotlinx.coroutines.delay
 
-/** Punto di accesso dell'app: splash, poi le schede Libreria / Cattura / Player del footer. */
+/** App entry point: splash, then the footer's Library / Capture / Player tabs. */
 class MainActivity : ComponentActivity() {
 
     /**
-     * Trigger per passare alla scheda Cattura, aggiornabile sia da `onCreate`
-     * (avvio "a freddo", es. quando il bubble riapre l'app con un nuovo task dopo lo
-     * stop della registrazione) sia da `onNewIntent` (istanza già viva, riusata grazie
-     * a `FLAG_ACTIVITY_SINGLE_TOP`). Separato dagli state `rememberSaveable` della UI
-     * perché questi ultimi vivono solo dentro `setContent` e non sono raggiungibili da
+     * Trigger to switch to the Capture tab, which can be set both from `onCreate`
+     * ("cold" start, e.g. when the bubble reopens the app with a new task after
+     * recording stops) and from `onNewIntent` (instance already alive, reused thanks
+     * to `FLAG_ACTIVITY_SINGLE_TOP`). Kept apart from the UI's `rememberSaveable` state
+     * because that state lives only inside `setContent` and cannot be reached from
      * `onNewIntent`.
      */
     private var openImportScreenRequest by mutableStateOf(false)
 
-    /** Cattura in attesa, editor ed elaborazione: sopravvive alle rotazioni dello schermo. */
+    /** Pending capture, editor and processing: survives screen rotations. */
     private val importViewModel: ImportViewModel by viewModels { ImportViewModel.Factory }
 
-    /** Brano della Libreria aperto nel player. */
+    /** Library track open in the player. */
     private val playerViewModel: PlayerViewModel by viewModels { PlayerViewModel.Factory }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Dopo la morte del processo il sistema riconsegna l'Intent originale (l'extra rimosso non
-        // viene salvato): senza questo controllo la ricreazione riaprirebbe Cattura e l'editor.
+        // After process death the system redelivers the original Intent (the removed extra is not
+        // saved): without this check the recreation would reopen Capture and the editor.
         if (savedInstanceState == null && intent.consumeOpenImportScreenExtra()) {
             openImportScreenRequest = true
             importViewModel.loadPendingCapture(openEditor = true)
@@ -69,10 +69,10 @@ class MainActivity : ComponentActivity() {
                 val playerState by importViewModel.playerState.collectAsState()
                 val snackbarHostState = remember { SnackbarHostState() }
                 val current = AppNavigation.resolve(tab, hasTrack = player != null)
-                // Scheda letta al momento della chiamata, non `current`: BackHandler (activity 1.13)
-                // ed effetti possono invocare una closure di una composizione precedente.
+                // Tab read at call time, not `current`: BackHandler (activity 1.13)
+                // and effects may invoke a closure from a previous composition.
                 fun liveTab() = AppNavigation.resolve(tab, hasTrack = playerViewModel.state.value != null)
-                // Unico punto di cambio scheda: la riproduzione della scheda lasciata va in pausa.
+                // Single place where the tab changes: playback of the tab being left is paused.
                 fun selectTab(new: AppTab) {
                     val from = liveTab()
                     if (new == from) return
@@ -84,11 +84,11 @@ class MainActivity : ComponentActivity() {
                     tab = new
                 }
                 val playerEnabled = player != null
-                // Stabile tra un tick di posizione e l'altro del player, che ricompone questa root.
+                // Stable across the player's position ticks, which recompose this root.
                 val bottomBar: @Composable () -> Unit = remember(current, playerEnabled) {
                     { AppBottomBar(selected = current, playerEnabled = playerEnabled, onSelect = ::selectTab) }
                 }
-                // Ogni scheda conserva il proprio stato salvabile (scroll, finestre) quando si cambia scheda.
+                // Each tab keeps its own saveable state (scroll, dialogs) when switching tabs.
                 val tabStateHolder = rememberSaveableStateHolder()
                 LaunchedEffect(Unit) {
                     importViewModel.events.collect { event ->
@@ -197,10 +197,10 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        /** Impostato da `BubbleOverlayService` quando la registrazione termina, per
-         * riportare in primo piano la scheda Cattura indipendentemente da dove si
-         * trovasse l'utente prima di avviare la cattura (o dallo stato di default
-         * dell'app se l'istanza dell'Activity era nel frattempo terminata). */
+        /** Set by `BubbleOverlayService` when recording ends, to
+         * bring the Capture tab back to the foreground regardless of where
+         * the user was before starting the capture (or of the app's default
+         * state if the Activity instance was terminated meanwhile). */
         const val EXTRA_OPEN_IMPORT_SCREEN = "open_import_screen"
     }
 }

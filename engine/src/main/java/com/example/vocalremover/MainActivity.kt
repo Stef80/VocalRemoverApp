@@ -76,18 +76,18 @@ class MainActivity : AppCompatActivity() {
     private var processingCaptureOutputPath: String? = null
     private var captureProcessingJob: Job? = null
     private var discardCaptureWorkOnCancellation = false
-    // Nome con cui salvare automaticamente il risultato del brano scelto da file;
-    // null per i flussi di cattura, che hanno un proprio salvataggio.
+    // Name used to auto-save the result of the song picked from a file;
+    // null for capture flows, which have their own saving.
     private var pendingAutoSaveName: String? = null
 
-    // ── Launcher file picker ─────────────────────────────────────────────────
+    // ── File picker launcher ─────────────────────────────────────────────────
     private val pickAudioLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let { processAudio(it) }
     }
 
-    // ── Launcher permessi ────────────────────────────────────────────────────
+    // ── Permission launcher ──────────────────────────────────────────────────
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -179,7 +179,7 @@ class MainActivity : AppCompatActivity() {
         vocalRemover = VocalRemover(this)
         lifecycleScope.launch(Dispatchers.Default) {
             runCatching { vocalRemover.warmUp() }
-                .onFailure { Log.w(TAG, "Preparazione modello fallita", it) }
+                .onFailure { Log.w(TAG, "Model preparation failed", it) }
         }
         audioPlayer = AudioPlayer(this)
 
@@ -379,15 +379,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ── Elaborazione ─────────────────────────────────────────────────────────
+    // ── Processing ───────────────────────────────────────────────────────────
     private fun processAudio(uri: Uri) {
-        Log.i(TAG, "Richiesta caricamento brano: uri=$uri")
+        Log.i(TAG, "Track load requested: uri=$uri")
         setPlayerEnabled(false)
         binding.progressBar.visibility = android.view.View.VISIBLE
         binding.progressBar.progress = 0
         binding.tvStatus.text = "Avvio elaborazione..."
 
-        // Mostra nome file
+        // Show file name
         var sourceName: String? = null
         contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
             null, null, null)?.use { cursor ->
@@ -395,7 +395,7 @@ class MainActivity : AppCompatActivity() {
                 val name = cursor.getString(0)
                 sourceName = name
                 binding.tvFileName.text = name
-                Log.i(TAG, "Brano selezionato: name=$name")
+                Log.i(TAG, "Track selected: name=$name")
             }
         }
         pendingAutoSaveName = RecordingFileNaming.instrumentalName(sourceName)
@@ -416,7 +416,7 @@ class MainActivity : AppCompatActivity() {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                Log.e(TAG, "Salvataggio automatico brano elaborato fallito", error)
+                Log.e(TAG, "Auto-save of the processed track failed", error)
                 val msg = error.message ?: "Impossibile salvare il brano elaborato."
                 binding.tvStatus.text = "Errore salvataggio: $msg"
                 Toast.makeText(this@MainActivity, "Errore salvataggio: $msg", Toast.LENGTH_LONG).show()
@@ -424,7 +424,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ── Cattura e salvataggio registrazione ───────────────────────────────────
+    // ── Capture and recording save ────────────────────────────────────────────
     private fun startCapture() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             setCaptureUiState(
@@ -569,7 +569,7 @@ class MainActivity : AppCompatActivity() {
         )
         Log.i(
             TAG,
-            "Avvio elaborazione registrazione catturata: resultId=${result.id} file=${temporaryWav.absolutePath} bytes=${temporaryWav.length()}"
+            "Processing of captured recording started: resultId=${result.id} file=${temporaryWav.absolutePath} bytes=${temporaryWav.length()}"
         )
         setPlayerEnabled(false)
         binding.progressBar.visibility = View.VISIBLE
@@ -580,7 +580,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val instrumental = withContext(Dispatchers.IO) {
                     val stereoPcm = WavFileReader.readStereoPcm(temporaryWav)
-                    Log.i(TAG, "Registrazione caricata: frames=${stereoPcm.size}")
+                    Log.i(TAG, "Recording loaded: frames=${stereoPcm.size}")
                     runCatching {
                         RecordingSaver.saveStereoCaptureAsWav(
                             this@MainActivity,
@@ -598,7 +598,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 ensureActive()
                 captureProcessingJob = null
-                Log.i(TAG, "Elaborazione registrazione completata: resultId=${result.id}")
+                Log.i(TAG, "Recording processing completed: resultId=${result.id}")
                 showRecordingNameDialog(instrumental, result.id)
             } catch (cancelled: CancellationException) {
                 handleCaptureWorkCancellation(result.id)
@@ -665,7 +665,7 @@ class MainActivity : AppCompatActivity() {
         binding.tvStatus.text = "Salvataggio registrazione..."
         Log.i(
             TAG,
-            "Avvio salvataggio registrazione elaborata: resultId=$resultId name=$displayName frames=${instrumental.size}"
+            "Saving processed recording started: resultId=$resultId name=$displayName frames=${instrumental.size}"
         )
         captureProcessingJob = lifecycleScope.launch {
             try {
@@ -688,7 +688,7 @@ class MainActivity : AppCompatActivity() {
                 binding.tvFileName.text = "$displayName.wav"
                 audioPlayer.loadProcessedStereo(monoPcm)
                 ensureActive()
-                Log.i(TAG, "Salvataggio registrazione completato: resultId=$resultId")
+                Log.i(TAG, "Recording save completed: resultId=$resultId")
                 completeSavedCaptureHandoff(resultId)
             } catch (cancelled: CancellationException) {
                 handleCaptureWorkCancellation(resultId)
@@ -921,7 +921,7 @@ class MainActivity : AppCompatActivity() {
         MediaProjectionConfig.createConfigForDefaultDisplay()
     )
 
-    // ── Permessi ─────────────────────────────────────────────────────────────
+    // ── Permissions ──────────────────────────────────────────────────────────
     private fun requestStoragePermissionAndPick() {
         val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             Manifest.permission.READ_MEDIA_AUDIO
@@ -951,11 +951,11 @@ class MainActivity : AppCompatActivity() {
 }
 
 /**
- * ArrayAdapter con filtro "contains" (case-insensitive) invece del default
- * "startsWith" per parola. Mantiene sempre l'elenco completo originale, così
- * il menu a tendina può essere riaperto e rifiltrato ripetutamente (il
- * ArrayAdapter standard perde il riferimento alla lista completa dopo la
- * prima selezione/filtraggio).
+ * ArrayAdapter with a "contains" filter (case-insensitive) instead of the default
+ * per-word "startsWith". It always keeps the full original list, so the
+ * dropdown can be reopened and filtered again repeatedly (the
+ * standard ArrayAdapter loses the reference to the full list after the
+ * first selection/filtering).
  */
 private class ContainsFilterAdapter(
     context: Context,

@@ -5,7 +5,11 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.vocalremover.capture.CapturedTrackInfo
 import com.example.vocalremover.library.LibraryTrack
+import com.example.vocalremover.lyrics.LyricsStatus
+import com.example.vocalremover.lyrics.TimedLine
+import com.example.vocalremover.lyrics.TrackLyrics
 import com.example.vocalremover.playback.PlayerError
 import com.example.vocalremover.playback.PlayerState
 import com.stef.vocalremover.ui.PreviewPlayer
@@ -34,11 +38,23 @@ class PlayerViewModelTest {
     private val track = LibraryTrack(Uri.parse("content://media/external/audio/media/5"), "Canzone", 60_000L)
     private lateinit var viewModel: PlayerViewModel
 
+    private val dispatcher = UnconfinedTestDispatcher()
+    private var storedLyrics: TrackLyrics? = null
+
     @Before
     fun setUp() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
-        viewModel = PlayerViewModel(player)
+        Dispatchers.setMain(dispatcher)
+        viewModel = PlayerViewModel(player, loadLyrics = { storedLyrics }, ioDispatcher = dispatcher)
     }
+
+    private fun lyrics(status: LyricsStatus, lines: List<TimedLine> = emptyList(), plain: String? = null, offset: Long? = 5_000) =
+        TrackLyrics(
+            savedUri = track.uri.toString(),
+            track = CapturedTrackInfo("T", "A", null, null, offset, "pkg", null),
+            status = status,
+            lines = lines,
+            plainText = plain,
+        )
 
     @After
     fun tearDown() = Dispatchers.resetMain()
@@ -143,6 +159,67 @@ class PlayerViewModelTest {
         viewModel.open(track)
         viewModel.onTrackRenamed(track.uri, "  Nuovo: titolo ")
         assertEquals("Nuovo_ titolo", viewModel.state.value?.track?.title)
+    }
+
+    @Test
+    fun `track without lyrics file plays at once`() {
+        viewModel.open(track)
+        assertEquals(PlayerLyrics.Unavailable, viewModel.state.value?.lyrics)
+        assertEquals(listOf("stop", "play(${track.uri})"), player.calls)
+    }
+
+    @Test
+    fun `pending lyrics keep the track waiting until downloaded`() {
+        storedLyrics = lyrics(LyricsStatus.PENDING)
+        viewModel.open(track)
+        assertEquals(PlayerLyrics.Loading, viewModel.state.value?.lyrics)
+        assertEquals(listOf("stop"), player.calls)
+
+        dispatcher.scheduler.advanceTimeBy(PlayerViewModel.LYRICS_POLL_MS * 3)
+        assertEquals(listOf("stop"), player.calls)
+
+        storedLyrics = lyrics(LyricsStatus.FOUND, lines = listOf(TimedLine(6_000, "uno"), TimedLine(9_000, "due")))
+        dispatcher.scheduler.advanceTimeBy(PlayerViewModel.LYRICS_POLL_MS + 1)
+        assertEquals(listOf("stop", "play(${track.uri})"), player.calls)
+        val shown = viewModel.state.value?.lyrics as PlayerLyrics.Synced
+        assertEquals(listOf("uno", "due"), shown.lines)
+        // With a 5 s offset "uno" starts at 1 s into the file, "due" at 4 s.
+        assertEquals(-1, shown.activeLine(500))
+        assertEquals(0, shown.activeLine(1_000))
+        assertEquals(1, shown.activeLine(4_500))
+    }
+
+    @Test
+    fun `controls do nothing while lyrics are loading`() {
+        storedLyrics = lyrics(LyricsStatus.PENDING)
+        viewModel.open(track)
+        player.calls.clear()
+        viewModel.play()
+        viewModel.togglePlayback()
+        viewModel.forward()
+        viewModel.seekTo(3_000)
+        assertEquals(emptyList<String>(), player.calls)
+    }
+
+    @Test
+    fun `reopening another track stops waiting for the previous lyrics`() {
+        storedLyrics = lyrics(LyricsStatus.PENDING)
+        viewModel.open(track)
+        val other = LibraryTrack(Uri.parse("content://media/external/audio/media/6"), "Altra", 30_000L)
+        storedLyrics = null
+        viewModel.open(other)
+        dispatcher.scheduler.advanceTimeBy(PlayerViewModel.LYRICS_POLL_MS * 2)
+        assertEquals(listOf("stop", "stop", "play(${other.uri})"), player.calls)
+    }
+
+    @Test
+    fun `stored statuses map to what the player shows`() {
+        assertEquals(PlayerLyrics.Instrumental, PlayerLyrics.from(lyrics(LyricsStatus.INSTRUMENTAL)))
+        assertEquals(PlayerLyrics.Unavailable, PlayerLyrics.from(lyrics(LyricsStatus.NOT_FOUND)))
+        assertEquals(PlayerLyrics.Unavailable, PlayerLyrics.from(lyrics(LyricsStatus.FAILED)))
+        assertEquals(PlayerLyrics.Plain("testo"), PlayerLyrics.from(lyrics(LyricsStatus.FOUND, plain = "testo")))
+        assertEquals(PlayerLyrics.Unavailable, PlayerLyrics.from(lyrics(LyricsStatus.FOUND)))
+        assertEquals(0L, (PlayerLyrics.from(lyrics(LyricsStatus.FOUND, listOf(TimedLine(1, "x")), offset = null)) as PlayerLyrics.Synced).songOffsetMs)
     }
 
     @Test

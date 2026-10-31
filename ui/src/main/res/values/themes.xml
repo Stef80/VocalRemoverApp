@@ -7,11 +7,11 @@
         <item name="android:windowLightStatusBar">false</item>
     </style>
 
-    <!-- Usato solo da MediaProjectionConsentActivity: un'Activity "trampolino"
-         (ComponentActivity, nessuna UI Compose propria) che deve solo mostrare
-         il dialog di sistema del consenso MediaProjection sopra il bubble
-         flottante. ComponentActivity non richiede un tema discendente di
-         AppCompat: si parte dal tema di sistema per la trasparenza. -->
+    <!-- Used only by MediaProjectionConsentActivity: a "trampoline" Activity
+         (ComponentActivity, no Compose UI of its own) that only has to show
+         the system MediaProjection consent dialog on top of the floating
+         bubble. ComponentActivity does not require a theme descending from
+         AppCompat: it starts from the system theme for transparency. -->
     <style name="Theme.VocalRemover.Transparent" parent="android:Theme.Translucent.NoTitleBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>

@@ -10,12 +10,12 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.MediaExtractorCompat
 import com.example.vocalremover.StereoPcm
 
-/** Il file non si può decodificare; [message] dice perché (solo log, non per l'utente). */
+/** The file cannot be decoded; [message] says why (logs only, not for the user). */
 class DecodeException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
- * Decodifica qualsiasi file audio supportato da MediaCodec in PCM stereo float a 44,1 kHz.
- * Il mono finisce uguale su L e R; oltre due canali si tengono i primi due.
+ * Decodes any audio file supported by MediaCodec into 44.1 kHz float stereo PCM.
+ * Mono ends up identical on L and R; beyond two channels the first two are kept.
  */
 @OptIn(UnstableApi::class)
 class AudioDecoder(context: Context) {
@@ -28,7 +28,7 @@ class AudioDecoder(context: Context) {
 
     private val appContext = context.applicationContext
 
-    /** Bloccante: va chiamata fuori dal main thread. */
+    /** Blocking: must be called off the main thread. */
     fun decode(uri: Uri): StereoPcm {
         val start = System.currentTimeMillis()
         val extractor = MediaExtractorCompat(appContext)
@@ -48,17 +48,17 @@ class AudioDecoder(context: Context) {
             }
             if (format == null) throw DecodeException("Nessuna traccia audio: $uri")
 
-            // Valori del contenitore: il decoder può cambiarli (es. HE-AAC con SBR/PS dichiarato
-            // 22050 Hz mono ed emesso a 44100 Hz stereo), quindi si aggiornano su INFO_OUTPUT_FORMAT_CHANGED.
+            // Container values: the decoder may change them (e.g. HE-AAC with SBR/PS declared
+            // 22050 Hz mono and output at 44100 Hz stereo), so they are updated on INFO_OUTPUT_FORMAT_CHANGED.
             var srcSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             var srcChannels   = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             val durationUs    = if (format.containsKey(MediaFormat.KEY_DURATION))
                 format.getLong(MediaFormat.KEY_DURATION) else 0L
             val mime          = format.getString(MediaFormat.KEY_MIME)!!
 
-            Log.i(TAG, "Decodifica audio iniziata: sampleRate=$srcSampleRate channels=$srcChannels durationUs=$durationUs")
+            Log.i(TAG, "Audio decoding started: sampleRate=$srcSampleRate channels=$srcChannels durationUs=$durationUs")
 
-            // Stima in frame (indipendente da 16/32 bit). Margine extra per evitare resize.
+            // Estimate in frames (independent of 16/32 bit). Extra margin to avoid resizing.
             val initialCapacity = if (durationUs > 0)
                 ((durationUs * srcSampleRate) / 1_000_000L).toInt() + 4096
             else 1 shl 20   // 1M frame fallback
@@ -78,8 +78,8 @@ class AudioDecoder(context: Context) {
             var eosOut = false
 
             while (!eosOut) {
-                // Dopo l'EOS in ingresso non si accoda più nulla: alcuni codec lanciano
-                // IllegalStateException se ricevono buffer dopo BUFFER_FLAG_END_OF_STREAM.
+                // After the input EOS nothing more is queued: some codecs throw
+                // IllegalStateException if they receive buffers after BUFFER_FLAG_END_OF_STREAM.
                 val inIdx = if (eosIn) -1 else decoder.dequeueInputBuffer(TIMEOUT_US)
                 if (inIdx >= 0) {
                     val buf = decoder.getInputBuffer(inIdx)!!
@@ -97,11 +97,11 @@ class AudioDecoder(context: Context) {
                 if (outIdx >= 0) {
                     if (info.size > 0) {
                         val byteBuf = decoder.getOutputBuffer(outIdx)!!
-                        // Pattern documentato: limitare alla finestra valida
+                        // Documented pattern: limit to the valid window
                         byteBuf.position(info.offset)
                         byteBuf.limit(info.offset + info.size)
 
-                        // Crescita geometrica per ridurre i copyOf
+                        // Geometric growth to reduce copyOf calls
                         val frameBytes = (if (isPcmFloat) 4 else 2) * srcChannels
                         val needed = sampleIndex + info.size / frameBytes
                         if (needed > left.size) {
@@ -121,17 +121,17 @@ class AudioDecoder(context: Context) {
                     val outFormat = decoder.outputFormat
                     srcSampleRate = outFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                     srcChannels   = outFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                    // getInteger(key, default) esiste solo da API 29: minSdk è 26.
+                    // getInteger(key, default) exists only since API 29: minSdk is 26.
                     isPcmFloat = PcmDeinterleaver.isFloatEncoding(
                         if (outFormat.containsKey(MediaFormat.KEY_PCM_ENCODING))
                             outFormat.getInteger(MediaFormat.KEY_PCM_ENCODING) else null
                     )
-                    Log.i(TAG, "Formato di uscita del decoder: sampleRate=$srcSampleRate channels=$srcChannels float=$isPcmFloat")
+                    Log.i(TAG, "Decoder output format: sampleRate=$srcSampleRate channels=$srcChannels float=$isPcmFloat")
                 }
             }
 
             if (sampleIndex == 0) throw DecodeException("Nessun campione decodificato: $uri")
-            Log.i(TAG, "Decodifica audio completata: decodedFrames=$sampleIndex")
+            Log.i(TAG, "Audio decoding completed: decodedFrames=$sampleIndex")
 
             val decoded = StereoPcm(
                 if (sampleIndex == left.size)  left  else left.copyOf(sampleIndex),
@@ -146,13 +146,13 @@ class AudioDecoder(context: Context) {
         } catch (e: Exception) {
             throw DecodeException("Errore di decodifica: $uri", e)
         } finally {
-            // Rilascio anche sul percorso d'errore: le istanze di decoder hardware sono limitate.
+            // Released on the error path too: hardware decoder instances are limited.
             codec?.let {
-                try { it.stop() } catch (e: IllegalStateException) { Log.w(TAG, "Codec già fermo", e) }
+                try { it.stop() } catch (e: IllegalStateException) { Log.w(TAG, "Codec already stopped", e) }
                 it.release()
             }
             extractor.release()
-            Log.i(TAG, "Decodifica terminata in ${System.currentTimeMillis() - start}ms")
+            Log.i(TAG, "Decoding finished in ${System.currentTimeMillis() - start}ms")
         }
     }
 }

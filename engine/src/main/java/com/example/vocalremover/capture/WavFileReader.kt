@@ -8,7 +8,7 @@ import java.nio.ByteOrder
 
 object WavFileReader {
 
-    /** [dataOffset]: byte dove iniziano i campioni (l'header è fisso a 44 byte). */
+    /** [dataOffset]: byte where the samples start (the header is fixed at 44 bytes). */
     data class WavInfo(
         val sampleRate: Int,
         val channelCount: Int,
@@ -37,7 +37,7 @@ object WavFileReader {
             )
         }
 
-    /** Durata in ms, troncata. */
+    /** Duration in ms, truncated. */
     fun durationMs(info: WavInfo): Long = info.frameCount * 1000 / info.sampleRate
 
     fun readStereoPcm(file: File): StereoPcm =

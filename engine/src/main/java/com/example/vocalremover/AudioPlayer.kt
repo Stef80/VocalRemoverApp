@@ -20,8 +20,8 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
 /**
- * Gestisce la decodifica del file audio, il processo di rimozione vocale
- * e la riproduzione del risultato tramite AudioTrack in modalità streaming.
+ * Handles decoding of the audio file, the vocal removal process
+ * and playback of the result through AudioTrack in streaming mode.
  */
 class AudioPlayer(private val context: Context) {
 
@@ -37,9 +37,9 @@ class AudioPlayer(private val context: Context) {
     private var processedPcm: StereoPcm? = null
     private var playbackJob: Job? = null
     private var processingJob: Job? = null
-    // Posizione e generazione si scrivono solo sul thread principale. Il job di riproduzione
-    // lavora su una copia locale e la pubblica su Main solo se nessun seek/stop/play lo ha
-    // superato nel frattempo: un write() bloccante che rientra dopo il flush non sporca il seek.
+    // Position and generation are written only on the main thread. The playback job
+    // works on a local copy and publishes it on Main only if no seek/stop/play has
+    // overtaken it meanwhile: a blocking write() returning after the flush does not dirty the seek.
     private var playheadPosition = 0 // frames
     @Volatile private var playbackGeneration = 0
 
@@ -54,7 +54,7 @@ class AudioPlayer(private val context: Context) {
 
     fun loadProcessedStereo(stereoPcm: StereoPcm) {
         check(Looper.myLooper() == Looper.getMainLooper()) {
-            "loadProcessedStereo deve essere chiamato dal thread principale"
+            "loadProcessedStereo must be called from the main thread"
         }
 
         playbackJob?.cancel()
@@ -77,17 +77,17 @@ class AudioPlayer(private val context: Context) {
         try {
             withContext(Dispatchers.IO) {
                 try {
-                    Log.i(TAG, "Avvio caricamento audio: uri=$uri")
+                    Log.i(TAG, "Audio loading started: uri=$uri")
                     onProgress(2)
 
-                    // Decodifica e processamento in blocchi per limitare i riferimenti contemporanei ad array giganti
+                    // Decode and process in blocks to limit simultaneous references to huge arrays
                     val instrumental = decodeOrNull(uri)?.let { mix ->
-                        Log.i(TAG, "Caricamento completato: frames=${mix.size}")
-                        Log.i(TAG, "Avvio rimozione voce: frames=${mix.size}")
+                        Log.i(TAG, "Loading completed: frames=${mix.size}")
+                        Log.i(TAG, "Vocal removal started: frames=${mix.size}")
                         val result = remover.removeVocals(mix) { progress ->
                             onProgress(progress)
                         }
-                        Log.i(TAG, "Rimozione voce completata: frames=${result.size}")
+                        Log.i(TAG, "Vocal removal completed: frames=${result.size}")
                         result
                     }
 
@@ -98,7 +98,7 @@ class AudioPlayer(private val context: Context) {
 
                     processedPcm = instrumental
 
-                    System.gc() // Suggerimento per ripulire mix originale e instrumental stereo
+                    System.gc() // Hint to release the original mix and the stereo instrumental
 
                     withContext(Dispatchers.Main) {
                         prepareAudioTrack()
@@ -106,10 +106,10 @@ class AudioPlayer(private val context: Context) {
                     }
 
                 } catch (cancelled: CancellationException) {
-                    Log.i(TAG, "Elaborazione audio annullata dal ciclo di vita", cancelled)
+                    Log.i(TAG, "Audio processing cancelled by the lifecycle", cancelled)
                     return@withContext
                 } catch (e: Exception) {
-                    Log.e(TAG, "Errore elaborazione", e)
+                    Log.e(TAG, "Processing error", e)
                     withContext(Dispatchers.Main) { onError(e.message ?: "Errore sconosciuto") }
                 }
             }
@@ -122,13 +122,13 @@ class AudioPlayer(private val context: Context) {
 
     suspend fun loadSavedRecording(uri: Uri) = withContext(Dispatchers.IO) {
         val stereoPcm = decodeOrNull(uri)
-            ?: throw IllegalStateException("Impossibile aprire la registrazione salvata")
+            ?: throw IllegalStateException("Cannot open the saved recording")
         withContext(Dispatchers.Main) {
             loadProcessedStereo(stereoPcm)
         }
     }
 
-    /** Errori di decodifica → null: la MainActivity legacy mostra il messaggio generico di sempre. */
+    /** Decoding errors → null: the legacy MainActivity shows its usual generic message. */
     private fun decodeOrNull(uri: Uri): StereoPcm? = try {
         decoder.decode(uri)
     } catch (e: DecodeException) {
@@ -196,7 +196,7 @@ class AudioPlayer(private val context: Context) {
                         }
                     }
                 } else {
-                    delay(50) // Pausato
+                    delay(50) // Paused
                 }
             }
             if (position >= totalFrames) {
@@ -208,8 +208,8 @@ class AudioPlayer(private val context: Context) {
     }
 
     /**
-     * Fine brano: in MODE_STREAM AudioTrack.stop() suona comunque i dati già scritti,
-     * quindi niente flush() (taglierebbe la coda dell'instrumentale).
+     * End of track: in MODE_STREAM AudioTrack.stop() still plays the data already written,
+     * so no flush() (it would cut the tail of the instrumental).
      */
     private fun finishPlayback() {
         audioTrack?.stop()

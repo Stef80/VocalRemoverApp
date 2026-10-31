@@ -37,13 +37,13 @@ class WavFileWriterTest {
             val fmt = ByteArray(4).also { buffer.get(it) }
             assertEquals("fmt ", String(fmt, Charsets.US_ASCII))
 
-            assertEquals(16, buffer.int) // dimensione subchunk fmt
+            assertEquals(16, buffer.int) // fmt subchunk size
             assertEquals(1, buffer.short.toInt()) // PCM
-            assertEquals(2, buffer.short.toInt()) // canali
+            assertEquals(2, buffer.short.toInt()) // channels
             assertEquals(48000, buffer.int) // sample rate
             assertEquals(48000 * 2 * 2, buffer.int) // byte rate
             assertEquals(4, buffer.short.toInt()) // block align
-            assertEquals(16, buffer.short.toInt()) // bit per campione
+            assertEquals(16, buffer.short.toInt()) // bits per sample
 
             val data = ByteArray(4).also { buffer.get(it) }
             assertEquals("data", String(data, Charsets.US_ASCII))
@@ -94,7 +94,7 @@ class WavFileWriterTest {
             writer.write(ByteArray(4), 0, 4)
             fail("Expected closed writer")
         } catch (expected: IllegalStateException) {
-            assertEquals("WavFileWriter già chiuso", expected.message)
+            assertEquals("WavFileWriter already closed", expected.message)
         }
     }
 

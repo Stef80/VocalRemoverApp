@@ -26,8 +26,8 @@ fun interface InstrumentalExtractor {
 fun interface InstrumentalSaver { fun save(pcm: StereoPcm, displayName: String): Uri }
 
 /**
- * Dal file scelto allo strumentale salvato in Music/VocalRemover: decodifica → removeVocals →
- * salvataggio WAV. Una sola elaborazione alla volta; main-safe.
+ * From the chosen file to the instrumental saved in Music/VocalRemover: decode → removeVocals →
+ * WAV save. One processing run at a time; main-safe.
  */
 class SongProcessor(
     private val decoder: PcmDecoder,
@@ -40,7 +40,7 @@ class SongProcessor(
     companion object {
         private const val TAG = "SongProcessor"
 
-        /** Collega AudioDecoder, VocalRemover e RecordingSaver reali. */
+        /** Wires the real AudioDecoder, VocalRemover and RecordingSaver. */
         fun create(context: Context, remover: VocalRemover): SongProcessor {
             val appContext = context.applicationContext
             return SongProcessor(
@@ -59,17 +59,17 @@ class SongProcessor(
     private val busy = AtomicBoolean(false)
 
     /**
-     * Restituisce l'Uri salvato. In caso di errore imposta [ProcessingState.Failed] e lancia
-     * [ProcessingException]; se annullata torna a [ProcessingState.Idle].
+     * Returns the saved Uri. On error it sets [ProcessingState.Failed] and throws
+     * [ProcessingException]; if cancelled it goes back to [ProcessingState.Idle].
      */
     suspend fun process(source: Uri, displayName: String): Uri {
-        // Rifiuto prima di toccare lo stato: quello dell'elaborazione in corso resta coerente.
+        // Reject before touching the state: the state of the running processing stays consistent.
         check(busy.compareAndSet(false, true)) { "Elaborazione già in corso" }
         var phase = ProcessingError.DECODE_FAILED
         try {
             _state.value = ProcessingState.Decoding
-            // Riferimento azzerato appena estratto lo strumentale: niente due brani interi in RAM
-            // durante il salvataggio.
+            // Reference cleared as soon as the instrumental is extracted: no two whole tracks in RAM
+            // while saving.
             var mix: StereoPcm? = withContext(ioDispatcher) { decoder.decode(source) }
 
             phase = ProcessingError.INFERENCE_FAILED
@@ -83,8 +83,8 @@ class SongProcessor(
 
             phase = ProcessingError.SAVE_FAILED
             _state.value = ProcessingState.Saving
-            // Iniziato il salvataggio il file esiste: si finisce in Done anche se arriva
-            // l'annullamento, altrimenti resterebbe un WAV che la UI non conosce.
+            // Once saving has started the file exists: we end in Done even if a cancellation
+            // arrives, otherwise a WAV unknown to the UI would be left behind.
             return withContext(NonCancellable + ioDispatcher) {
                 saver.save(instrumental, displayName).also { _state.value = ProcessingState.Done(it) }
             }
@@ -92,9 +92,9 @@ class SongProcessor(
             if (_state.value !is ProcessingState.Done) _state.value = ProcessingState.Idle
             throw e
         } catch (e: Throwable) {
-            // Anche gli Error (es. OutOfMemoryError su un brano molto lungo): lo stato non deve
-            // restare bloccato a metà e il chiamante riceve una ProcessingException normale.
-            Log.e(TAG, "Elaborazione fallita in fase $phase: $source", e)
+            // Errors too (e.g. OutOfMemoryError on a very long track): the state must not
+            // stay stuck halfway and the caller gets a normal ProcessingException.
+            Log.e(TAG, "Processing failed at stage $phase: $source", e)
             _state.value = ProcessingState.Failed(phase)
             throw ProcessingException(phase, e)
         } finally {
