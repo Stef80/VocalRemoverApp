@@ -84,7 +84,7 @@ class SongProcessorTest {
 
     @Test
     fun `decode failure reports DECODE_FAILED`() = runTest {
-        val processor = processor(decoder = PcmDecoder { throw DecodeException("rotto") })
+        val processor = processor(decoder = PcmDecoder { throw DecodeException("broken") })
 
         val error = expectFailure(processor)
 
@@ -104,7 +104,7 @@ class SongProcessorTest {
 
     @Test
     fun `save failure reports SAVE_FAILED`() = runTest {
-        val processor = processor(saver = InstrumentalSaver { _, _ -> throw IOException("disco pieno") })
+        val processor = processor(saver = InstrumentalSaver { _, _ -> throw IOException("disk full") })
 
         val error = expectFailure(processor)
 
@@ -114,7 +114,7 @@ class SongProcessorTest {
 
     @Test
     fun `out of memory while decoding reports DECODE_FAILED instead of escaping`() = runTest {
-        val processor = processor(decoder = PcmDecoder { throw OutOfMemoryError("brano troppo lungo") })
+        val processor = processor(decoder = PcmDecoder { throw OutOfMemoryError("track too long") })
 
         val error = expectFailure(processor)
 
@@ -182,7 +182,7 @@ class SongProcessorTest {
     @Test
     fun `process can run again after a failure`() = runTest {
         var fail = true
-        val processor = processor(decoder = PcmDecoder { if (fail) throw DecodeException("rotto") else mix })
+        val processor = processor(decoder = PcmDecoder { if (fail) throw DecodeException("broken") else mix })
         expectFailure(processor)
 
         fail = false

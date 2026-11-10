@@ -16,7 +16,7 @@ internal object PcmDeinterleaver {
     fun isFloatEncoding(encoding: Int?): Boolean = when (encoding) {
         null, AudioFormat.ENCODING_PCM_16BIT -> false
         AudioFormat.ENCODING_PCM_FLOAT -> true
-        else -> throw DecodeException("Codifica PCM non supportata: $encoding")
+        else -> throw DecodeException("Unsupported PCM encoding: $encoding")
     }
 
     /**

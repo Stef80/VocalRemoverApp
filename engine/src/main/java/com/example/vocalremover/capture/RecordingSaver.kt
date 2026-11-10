@@ -38,7 +38,7 @@ object RecordingSaver {
         try {
             resolver.openOutputStream(uri, "w")?.use { output ->
                 WavPcm16ProcessedSerializer.writeTo(output, stereoPcm.left, stereoPcm.right)
-            } ?: throw IOException("Impossibile aprire il file WAV in MediaStore")
+            } ?: throw IOException("Cannot open the WAV file in MediaStore")
 
             val updated = resolver.update(
                 uri,
@@ -49,7 +49,7 @@ object RecordingSaver {
                 null
             )
             if (updated != 1) {
-                throw IOException("Impossibile pubblicare il file WAV in MediaStore")
+                throw IOException("Cannot publish the WAV file in MediaStore")
             }
 
             Log.i(TAG, "Processed WAV save completed: uri=$uri")
@@ -79,11 +79,11 @@ object RecordingSaver {
                 put(MediaStore.MediaColumns.RELATIVE_PATH, RAW_RELATIVE_PATH)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
-        ) ?: throw IOException("Impossibile creare il file WAV raw in MediaStore")
+        ) ?: throw IOException("Cannot create the raw WAV file in MediaStore")
         try {
             resolver.openOutputStream(uri, "w")?.use { output ->
                 WavPcm16StereoSerializer.writeTo(output, stereoPcm.left, stereoPcm.right)
-            } ?: throw IOException("Impossibile aprire il file WAV raw in MediaStore")
+            } ?: throw IOException("Cannot open the raw WAV file in MediaStore")
 
             val updated = resolver.update(
                 uri,
@@ -94,7 +94,7 @@ object RecordingSaver {
                 null
             )
             if (updated != 1) {
-                throw IOException("Impossibile pubblicare il file WAV raw in MediaStore")
+                throw IOException("Cannot publish the raw WAV file in MediaStore")
             }
 
             Log.i(TAG, "Raw WAV save completed: uri=$uri")
@@ -114,7 +114,7 @@ object RecordingSaver {
         try {
             if (resolver.delete(uri, null, null) != 1) {
                 failure.addSuppressed(
-                    IOException("Impossibile eliminare il file WAV incompleto da MediaStore")
+                    IOException("Cannot delete the incomplete WAV file from MediaStore")
                 )
             }
         } catch (cleanupFailure: Throwable) {
@@ -131,7 +131,7 @@ internal object WavPcm16StereoSerializer {
     private const val BYTES_PER_SAMPLE = BITS_PER_SAMPLE / 8
 
     fun toWavBytes(left: FloatArray, right: FloatArray): ByteArray {
-        require(left.size == right.size) { "I canali stereo devono avere la stessa lunghezza" }
+        require(left.size == right.size) { "Stereo channels must have the same length" }
 
         val dataSize = left.size.toLong() * CHANNEL_COUNT * BYTES_PER_SAMPLE
         require(dataSize <= Int.MAX_VALUE - HEADER_SIZE) {
@@ -165,7 +165,7 @@ internal object WavPcm16StereoSerializer {
     }
 
     fun writeTo(output: OutputStream, left: FloatArray, right: FloatArray) {
-        require(left.size == right.size) { "I canali stereo devono avere la stessa lunghezza" }
+        require(left.size == right.size) { "Stereo channels must have the same length" }
 
         val dataSize = left.size.toLong() * CHANNEL_COUNT * BYTES_PER_SAMPLE
         require(dataSize <= UInt.MAX_VALUE.toLong()) {

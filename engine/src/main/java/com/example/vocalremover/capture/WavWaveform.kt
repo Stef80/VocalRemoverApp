@@ -16,7 +16,7 @@ object WavWaveform {
      * maximum of |L| and |R|.
      */
     fun peaks(file: File, buckets: Int): FloatArray {
-        require(buckets > 0) { "buckets deve essere positivo: $buckets" }
+        require(buckets > 0) { "buckets must be positive: $buckets" }
         val info = WavFileReader.readInfo(file)
         val frameCount = info.frameCount
         val count = minOf(buckets.toLong(), frameCount).toInt()
@@ -24,12 +24,12 @@ object WavWaveform {
         if (count == 0) return peaks
 
         BufferedInputStream(file.inputStream(), READ_BUFFER_BYTES).use { input ->
-            if (input.skip(info.dataOffset) != info.dataOffset) throw IOException("Header WAV incompleto")
+            if (input.skip(info.dataOffset) != info.dataOffset) throw IOException("Incomplete WAV header")
             val buffer = ByteArray(READ_BUFFER_BYTES - READ_BUFFER_BYTES % info.blockAlign)
             var frame = 0L
             while (frame < frameCount) {
                 val read = readFully(input, buffer)
-                if (read <= 0) throw IOException("Dati PCM16 WAV incompleti")
+                if (read <= 0) throw IOException("Incomplete PCM16 WAV data")
                 var offset = 0
                 while (offset + info.blockAlign <= read && frame < frameCount) {
                     val left = abs(pcm16At(buffer, offset).toInt())

@@ -30,9 +30,9 @@ object WavTrimmer {
     ) {
         val info = WavFileReader.readInfo(source)
         val durationMs = WavFileReader.durationMs(info)
-        require(startMs >= 0) { "Inizio negativo: $startMs" }
-        require(endMs <= durationMs) { "Fine oltre la durata: $endMs > $durationMs" }
-        require(endMs - startMs >= MIN_LENGTH_MS) { "Intervallo troppo corto: ${endMs - startMs} ms" }
+        require(startMs >= 0) { "Negative start: $startMs" }
+        require(endMs <= durationMs) { "End beyond duration: $endMs > $durationMs" }
+        require(endMs - startMs >= MIN_LENGTH_MS) { "Range too short: ${endMs - startMs} ms" }
 
         val startFrame = startMs * info.sampleRate / 1000
         // An end exactly at the (truncated) duration must include the last frames too.
@@ -64,7 +64,7 @@ object WavTrimmer {
         var remaining = byteCount
         while (remaining > 0) {
             val read = input.read(buffer, 0, minOf(remaining, buffer.size.toLong()).toInt())
-            if (read < 0) throw IOException("WAV sorgente più corto dell'header")
+            if (read < 0) throw IOException("Source WAV shorter than its header")
             writer.write(buffer, 0, read)
             remaining -= read
         }

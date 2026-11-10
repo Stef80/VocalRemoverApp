@@ -10,7 +10,7 @@ object BenchmarkMetrics {
 
     /** Like [snrDb] but summing energy and error of both channels. */
     fun stereoSnrDb(refL: FloatArray, refR: FloatArray, outL: FloatArray, outR: FloatArray): Double {
-        require(refL.size == outL.size && refR.size == outR.size) { "Lunghezze diverse" }
+        require(refL.size == outL.size && refR.size == outR.size) { "Lengths differ" }
         var signal = 0.0
         var noise = 0.0
         for ((ref, out) in listOf(refL to outL, refR to outR)) {

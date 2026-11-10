@@ -88,7 +88,7 @@ object BluesteinFft {
     private fun planFor(n: Int): Plan = planCache.computeIfAbsent(n) { Plan(it) }
 
     internal fun newWorkspace(n: Int): Workspace {
-        require(n > 0) { "La dimensione FFT deve essere positiva" }
+        require(n > 0) { "FFT size must be positive" }
         val plan = planFor(n)
         return Workspace(n, FloatArray(plan.m), FloatArray(plan.m))
     }
@@ -110,7 +110,7 @@ object BluesteinFft {
         workspace: Workspace? = null
     ) {
         val n = re.size
-        require(im.size == n) { "re e im devono avere la stessa lunghezza" }
+        require(im.size == n) { "re and im must have the same length" }
         if (n == 0) return
         if (n and (n - 1) == 0) {
             radix2Fft(re, im, inverse)
@@ -119,7 +119,7 @@ object BluesteinFft {
 
         val plan = planFor(n)
         val scratch = workspace ?: workspaceFor(n)
-        require(scratch.size == n) { "Il workspace FFT deve avere dimensione $n" }
+        require(scratch.size == n) { "FFT workspace must have size $n" }
 
         // a[k] = x[k] * exp(sign * i * pi * k^2 / n), zero-padded to length m.
         // forward: sign=-1 -> conj(chirp) = (chirpRe, -chirpIm)

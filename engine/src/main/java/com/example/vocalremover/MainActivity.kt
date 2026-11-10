@@ -24,6 +24,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.example.vocalremover.capture.CaptureErrorCode
 import com.example.vocalremover.capture.CapturePackageDirectory
 import com.example.vocalremover.capture.CapturePackageSuggestions
 import com.example.vocalremover.capture.CaptureProcessingLease
@@ -523,7 +524,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             CaptureTerminalKind.ERROR -> {
-                showCaptureFailure(result.errorMessage ?: "Errore durante la cattura audio.")
+                showCaptureFailure(captureErrorText(result.errorCode))
                 resultStore.clearClaim(result.id)
             }
 
@@ -948,6 +949,23 @@ class MainActivity : AppCompatActivity() {
         val seconds = TimeUnit.MILLISECONDS.toSeconds(ms.toLong()) % 60
         return "%02d:%02d".format(minutes, seconds)
     }
+}
+
+private fun captureErrorText(code: CaptureErrorCode?): String = when (code) {
+    CaptureErrorCode.INVALID_START_DATA -> "Dati di avvio della cattura non validi."
+    CaptureErrorCode.INVALID_CONSENT -> "Consenso alla cattura audio non valido."
+    CaptureErrorCode.CANCELLED_BEFORE_START -> "Cattura annullata prima dell'avvio della registrazione."
+    CaptureErrorCode.PERMISSION_DENIED -> "Permesso di registrazione audio non concesso."
+    CaptureErrorCode.UNSUPPORTED_CONFIGURATION -> "Configurazione audio non supportata da questo dispositivo."
+    CaptureErrorCode.INIT_FAILED -> "Impossibile inizializzare la cattura audio."
+    CaptureErrorCode.START_FAILED -> "Impossibile avviare la cattura audio."
+    CaptureErrorCode.NO_AUDIO_CAPTURED -> "Cattura annullata: nessun audio acquisito."
+    CaptureErrorCode.READ_FAILED -> "Lettura dell'audio non riuscita."
+    CaptureErrorCode.SIZE_LIMIT_REACHED -> "La registrazione ha raggiunto il limite WAV di 2 GB ed è stata annullata."
+    CaptureErrorCode.INTERRUPTED_BY_SYSTEM -> "La cattura è stata interrotta dal sistema."
+    CaptureErrorCode.FINALIZE_FAILED -> "Impossibile completare il file audio temporaneo."
+    CaptureErrorCode.UNEXPECTED_END -> "La cattura è terminata in modo imprevisto."
+    CaptureErrorCode.CAPTURE_FAILED, null -> "Errore durante la cattura audio."
 }
 
 /**

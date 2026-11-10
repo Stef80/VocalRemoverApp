@@ -37,7 +37,7 @@ class AudioDecoder(context: Context) {
             try {
                 extractor.setDataSource(uri, 0L)
             } catch (e: Exception) {
-                throw DecodeException("File non leggibile: $uri", e)
+                throw DecodeException("Unreadable file: $uri", e)
             }
             var audioTrackIdx = -1
             var format: MediaFormat? = null
@@ -46,7 +46,7 @@ class AudioDecoder(context: Context) {
                 val mime = f.getString(MediaFormat.KEY_MIME) ?: continue
                 if (mime.startsWith("audio/")) { audioTrackIdx = i; format = f; break }
             }
-            if (format == null) throw DecodeException("Nessuna traccia audio: $uri")
+            if (format == null) throw DecodeException("No audio track: $uri")
 
             // Container values: the decoder may change them (e.g. HE-AAC with SBR/PS declared
             // 22050 Hz mono and output at 44100 Hz stereo), so they are updated on INFO_OUTPUT_FORMAT_CHANGED.
@@ -130,7 +130,7 @@ class AudioDecoder(context: Context) {
                 }
             }
 
-            if (sampleIndex == 0) throw DecodeException("Nessun campione decodificato: $uri")
+            if (sampleIndex == 0) throw DecodeException("No samples decoded: $uri")
             Log.i(TAG, "Audio decoding completed: decodedFrames=$sampleIndex")
 
             val decoded = StereoPcm(
@@ -144,7 +144,7 @@ class AudioDecoder(context: Context) {
         } catch (e: DecodeException) {
             throw e
         } catch (e: Exception) {
-            throw DecodeException("Errore di decodifica: $uri", e)
+            throw DecodeException("Decoding error: $uri", e)
         } finally {
             // Released on the error path too: hardware decoder instances are limited.
             codec?.let {

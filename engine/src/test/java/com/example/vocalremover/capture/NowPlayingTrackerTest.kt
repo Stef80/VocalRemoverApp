@@ -31,11 +31,11 @@ class NowPlayingTrackerTest {
     private class FakeSource(var sessions: List<SessionHandle> = emptyList(), var denied: Boolean = false) : SessionSource {
         var onChange: ((List<SessionHandle>) -> Unit)? = null
         override fun activeSessions(): List<SessionHandle> {
-            if (denied) throw SecurityException("accesso alle notifiche mancante")
+            if (denied) throw SecurityException("notification access missing")
             return sessions
         }
         override fun observeSessions(onChange: (List<SessionHandle>) -> Unit) {
-            if (denied) throw SecurityException("accesso alle notifiche mancante")
+            if (denied) throw SecurityException("notification access missing")
             this.onChange = onChange
         }
         override fun stopObservingSessions() { onChange = null }

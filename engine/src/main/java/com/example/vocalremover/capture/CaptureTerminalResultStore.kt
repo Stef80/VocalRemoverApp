@@ -29,7 +29,9 @@ data class CaptureTerminalResult(
     val state: CaptureTerminalState = CaptureTerminalState.PENDING,
     val savedOutputUri: String? = null,
     /** Tracks seen during the capture; null if the media session was not readable. */
-    val trackTimeline: CaptureTrackTimeline? = null
+    val trackTimeline: CaptureTrackTimeline? = null,
+    /** Set for [CaptureTerminalKind.ERROR]; [errorMessage] is English, for logs only. */
+    val errorCode: CaptureErrorCode? = null
 )
 
 internal data class CaptureWorkState(
@@ -107,6 +109,7 @@ class CaptureTerminalResultStore(context: Context) {
         private const val KEY_KIND = "kind"
         private const val KEY_OUTPUT_PATH = "output_path"
         private const val KEY_ERROR_MESSAGE = "error_message"
+        private const val KEY_ERROR_CODE = "error_code"
         private const val KEY_CLAIMED_PROCESS_ID = "claimed_process_id"
         private const val KEY_STATE = "state"
         private const val KEY_OWNER_ID = "owner_id"
@@ -125,7 +128,8 @@ class CaptureTerminalResultStore(context: Context) {
         kind: CaptureTerminalKind,
         outputPath: String? = null,
         errorMessage: String? = null,
-        trackTimeline: CaptureTrackTimeline? = null
+        trackTimeline: CaptureTrackTimeline? = null,
+        errorCode: CaptureErrorCode? = null
     ): CaptureTerminalResult {
         require(kind != CaptureTerminalKind.STOPPED || !outputPath.isNullOrBlank()) {
             "A stopped capture requires an output path"
@@ -139,7 +143,8 @@ class CaptureTerminalResultStore(context: Context) {
             kind = kind,
             outputPath = outputPath,
             errorMessage = errorMessage,
-            trackTimeline = trackTimeline
+            trackTimeline = trackTimeline,
+            errorCode = errorCode
         )
         synchronized(lock) {
             check(
@@ -149,6 +154,7 @@ class CaptureTerminalResultStore(context: Context) {
                     .putString(KEY_KIND, result.kind.name)
                     .putString(KEY_OUTPUT_PATH, result.outputPath)
                     .putString(KEY_ERROR_MESSAGE, result.errorMessage)
+                    .putString(KEY_ERROR_CODE, result.errorCode?.name)
                     .putInt(KEY_CLAIMED_PROCESS_ID, 0)
                     .putString(KEY_STATE, CaptureTerminalState.PENDING.name)
                     .remove(KEY_OWNER_ID)
@@ -299,7 +305,8 @@ class CaptureTerminalResultStore(context: Context) {
             return null
         }
         return CaptureTerminalResult(
-            id, kind, outputPath, errorMessage, state, savedOutputUri, readTrackTimelineLocked()
+            id, kind, outputPath, errorMessage, state, savedOutputUri, readTrackTimelineLocked(),
+            CaptureErrorCode.fromName(preferences.getString(KEY_ERROR_CODE, null))
         )
     }
 

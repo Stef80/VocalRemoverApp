@@ -37,6 +37,7 @@ import java.util.concurrent.atomic.AtomicReference
 class SystemAudioCaptureService : Service() {
 
     companion object {
+        private const val LOG_TAG = "SystemAudioCapture"
         private const val CHANNEL_ID = "system_audio_capture"
         private const val NOTIFICATION_ID = 4242
         private const val STOP_REQUEST_CODE = 1
@@ -51,6 +52,8 @@ class SystemAudioCaptureService : Service() {
         const val EXTRA_TARGET_UID = "target_uid"
         const val EXTRA_OUTPUT_PATH = "output_path"
         const val EXTRA_ERROR_MESSAGE = "error_message"
+        /** [CaptureErrorCode.name] of the failure; [EXTRA_ERROR_MESSAGE] is English, for logs only. */
+        const val EXTRA_ERROR_CODE = "error_code"
 
         const val ACTION_STOP = "com.example.vocalremover.action.STOP_SYSTEM_AUDIO_CAPTURE"
         const val ACTION_CAPTURE_BLOCKED =
@@ -69,13 +72,18 @@ class SystemAudioCaptureService : Service() {
     private sealed interface CaptureResult {
         data object Blocked : CaptureResult
         data class Stopped(val outputFile: File) : CaptureResult
-        data class Error(val message: String) : CaptureResult
+        data class Error(val code: CaptureErrorCode, val message: String) : CaptureResult
     }
 
     private class CaptureBlockedException : Exception()
 
-    private class CaptureException(message: String, cause: Throwable? = null) :
-        Exception(message, cause)
+    private class CaptureException(
+        val code: CaptureErrorCode,
+        message: String,
+        cause: Throwable? = null
+    ) : Exception(message, cause)
+
+    private data class ProjectionFailure(val code: CaptureErrorCode, val message: String)
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
@@ -87,7 +95,7 @@ class SystemAudioCaptureService : Service() {
     private val projectionReleased = AtomicBoolean(false)
     private val audioRecordReleased = AtomicBoolean(false)
     private val recording = AtomicBoolean(false)
-    private val projectionFailure = AtomicReference<String?>(null)
+    private val projectionFailure = AtomicReference<ProjectionFailure?>(null)
     private val audioRecordLock = Any()
     private val projectionLock = Any()
 
@@ -105,7 +113,10 @@ class SystemAudioCaptureService : Service() {
             if (!projectionStopExpected.get()) {
                 projectionFailure.compareAndSet(
                     null,
-                    "La cattura è stata interrotta dal sistema"
+                    ProjectionFailure(
+                        CaptureErrorCode.INTERRUPTED_BY_SYSTEM,
+                        "The capture was stopped by the system"
+                    )
                 )
                 requestStop()
             }
@@ -139,7 +150,7 @@ class SystemAudioCaptureService : Service() {
             resultData == null ||
             targetUid < 0
         ) {
-            emitError("Dati di avvio della cattura non validi")
+            emitError(CaptureErrorCode.INVALID_START_DATA, "Invalid capture start data")
             stopSelf(startId)
             return START_NOT_STICKY
         }
@@ -151,9 +162,12 @@ class SystemAudioCaptureService : Service() {
             val projectionManager =
                 getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             val projection = projectionManager.getMediaProjection(resultCode, resultData)
-                ?: throw CaptureException("Consenso MediaProjection non valido")
+                ?: throw CaptureException(CaptureErrorCode.INVALID_CONSENT, "Invalid MediaProjection consent")
             if (!attachMediaProjection(projection)) {
-                throw CaptureException("La cattura è stata annullata prima dell'avvio")
+                throw CaptureException(
+                    CaptureErrorCode.CANCELLED_BEFORE_START,
+                    "The capture was cancelled before starting"
+                )
             }
 
             captureJob = serviceScope.launch {
@@ -162,7 +176,7 @@ class SystemAudioCaptureService : Service() {
         } catch (error: Exception) {
             releaseMediaProjection()
             stopForegroundSafely()
-            emitError(error.userMessage("Impossibile avviare la cattura"))
+            emitError(error.errorCode(CaptureErrorCode.START_FAILED), error.logMessage("Cannot start the capture"))
             stopSelf(startId)
         }
 
@@ -193,7 +207,7 @@ class SystemAudioCaptureService : Service() {
                 ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
                 PackageManager.PERMISSION_GRANTED
             ) {
-                throw CaptureException("Permesso di registrazione audio non concesso")
+                throw CaptureException(CaptureErrorCode.PERMISSION_DENIED, "RECORD_AUDIO permission not granted")
             }
 
             val config = AudioPlaybackCaptureConfiguration.Builder(projection)
@@ -209,7 +223,10 @@ class SystemAudioCaptureService : Service() {
                 AudioFormat.ENCODING_PCM_16BIT
             )
             if (minBufferSize <= 0) {
-                throw CaptureException("Configurazione audio non supportata da questo dispositivo")
+                throw CaptureException(
+                    CaptureErrorCode.UNSUPPORTED_CONFIGURATION,
+                    "Audio configuration not supported by this device"
+                )
             }
 
             val captureFile = File(
@@ -234,40 +251,55 @@ class SystemAudioCaptureService : Service() {
             installAudioRecord(record)
 
             if (record.state != AudioRecord.STATE_INITIALIZED) {
-                throw CaptureException("Impossibile inizializzare la cattura audio")
+                throw CaptureException(CaptureErrorCode.INIT_FAILED, "Cannot initialize the audio capture")
             }
 
             if (!stopRequested.get()) {
                 nowPlaying.start()
                 recordingStarted = startRecording(record)
                 if (!recordingStarted && !stopRequested.get()) {
-                    throw CaptureException("Impossibile avviare la cattura audio")
+                    throw CaptureException(CaptureErrorCode.START_FAILED, "Cannot start the audio capture")
                 }
                 if (recordingStarted) {
                     pcmBytesWritten = captureLoop(record, captureWriter, nowPlaying)
                 }
             }
 
-            projectionFailure.get()?.let { throw CaptureException(it) }
+            projectionFailure.get()?.let { throw CaptureException(it.code, it.message) }
             result = when {
                 !recordingStarted ->
-                    CaptureResult.Error("Cattura annullata prima dell'avvio della registrazione")
+                    CaptureResult.Error(
+                        CaptureErrorCode.CANCELLED_BEFORE_START,
+                        "Capture cancelled before recording started"
+                    )
                 pcmBytesWritten == 0L ->
-                    CaptureResult.Error("Cattura annullata: nessun audio acquisito")
+                    CaptureResult.Error(
+                        CaptureErrorCode.NO_AUDIO_CAPTURED,
+                        "Capture cancelled: no audio captured"
+                    )
                 else -> CaptureResult.Stopped(captureFile)
             }
         } catch (_: CaptureBlockedException) {
             result = CaptureResult.Blocked
         } catch (error: Exception) {
-            result = CaptureResult.Error(error.userMessage("Errore durante la cattura audio"))
+            result = CaptureResult.Error(
+                error.errorCode(CaptureErrorCode.CAPTURE_FAILED),
+                error.logMessage("Audio capture error")
+            )
         } finally {
             nowPlaying.stop()
             stopAndReleaseAudioRecord()
             val closeError = closeWriter(writer)
             val finalResult = when {
-                result == null -> CaptureResult.Error("La cattura è terminata in modo imprevisto")
+                result == null -> CaptureResult.Error(
+                    CaptureErrorCode.UNEXPECTED_END,
+                    "The capture ended unexpectedly"
+                )
                 closeError != null && result is CaptureResult.Stopped ->
-                    CaptureResult.Error("Impossibile completare il file audio temporaneo")
+                    CaptureResult.Error(
+                        CaptureErrorCode.FINALIZE_FAILED,
+                        "Cannot finalize the temporary audio file"
+                    )
                 else -> result
             }
 
@@ -282,7 +314,7 @@ class SystemAudioCaptureService : Service() {
 
                 is CaptureResult.Error -> {
                     outputFile?.delete()
-                    emitError(finalResult.message)
+                    emitError(finalResult.code, finalResult.message)
                 }
             }
             stopForegroundSafely()
@@ -330,7 +362,7 @@ class SystemAudioCaptureService : Service() {
 
                 read == 0 -> Unit
                 stopRequested.get() -> break
-                else -> throw CaptureException("Lettura audio non riuscita (codice $read)")
+                else -> throw CaptureException(CaptureErrorCode.READ_FAILED, "Audio read failed (code $read)")
             }
         }
 
@@ -397,7 +429,8 @@ class SystemAudioCaptureService : Service() {
     ): Long {
         if (!WavFileWriter.canAppendData(currentDataBytes, length)) {
             throw CaptureException(
-                "La registrazione ha raggiunto il limite WAV di 2 GB ed è stata annullata."
+                CaptureErrorCode.SIZE_LIMIT_REACHED,
+                "The recording reached the 2 GB WAV limit and was cancelled"
             )
         }
         writer.write(buffer, offset, length)
@@ -408,7 +441,10 @@ class SystemAudioCaptureService : Service() {
         synchronized(audioRecordLock) {
             if (audioRecordReleased.get()) {
                 record.release()
-                throw CaptureException("La cattura è stata arrestata prima dell'inizializzazione")
+                throw CaptureException(
+                    CaptureErrorCode.CANCELLED_BEFORE_START,
+                    "The capture was stopped before initialization"
+                )
             }
             audioRecord = record
         }
@@ -500,20 +536,27 @@ class SystemAudioCaptureService : Service() {
         )
     }
 
-    private fun emitError(message: String) {
-        emitTerminal(ACTION_CAPTURE_ERROR, CaptureTerminalKind.ERROR, errorMessage = message)
+    private fun emitError(code: CaptureErrorCode, message: String) {
+        Log.w(LOG_TAG, "Capture failed ($code): $message")
+        emitTerminal(
+            ACTION_CAPTURE_ERROR,
+            CaptureTerminalKind.ERROR,
+            errorCode = code,
+            errorMessage = message
+        )
     }
 
     private fun emitTerminal(
         action: String,
         kind: CaptureTerminalKind,
         outputPath: String? = null,
+        errorCode: CaptureErrorCode? = null,
         errorMessage: String? = null,
         trackTimeline: CaptureTrackTimeline? = null
     ) {
         if (!terminalBroadcastSent.compareAndSet(false, true)) return
         try {
-            CaptureTerminalResultStore(this).persist(kind, outputPath, errorMessage, trackTimeline)
+            CaptureTerminalResultStore(this).persist(kind, outputPath, errorMessage, trackTimeline, errorCode)
         } catch (_: Exception) {
             if (kind == CaptureTerminalKind.STOPPED) File(outputPath.orEmpty()).delete()
             return
@@ -524,6 +567,7 @@ class SystemAudioCaptureService : Service() {
                 .apply {
                     outputPath?.let { putExtra(EXTRA_OUTPUT_PATH, it) }
                     errorMessage?.let { putExtra(EXTRA_ERROR_MESSAGE, it) }
+                    errorCode?.let { putExtra(EXTRA_ERROR_CODE, it.name) }
                 }
         )
     }
@@ -572,6 +616,9 @@ class SystemAudioCaptureService : Service() {
             else -> getParcelableExtra(EXTRA_RESULT_DATA)
         }
 
-    private fun Exception.userMessage(defaultMessage: String): String =
+    private fun Exception.errorCode(defaultCode: CaptureErrorCode): CaptureErrorCode =
+        (this as? CaptureException)?.code ?: defaultCode
+
+    private fun Exception.logMessage(defaultMessage: String): String =
         message?.takeIf { it.isNotBlank() } ?: defaultMessage
 }

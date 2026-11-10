@@ -81,7 +81,7 @@ class WavTrimmerTest {
         override fun setLength(length: Long) = raf.setLength(length)
         override fun seek(position: Long) = raf.seek(position)
         override fun write(buffer: ByteArray, offset: Int, length: Int) {
-            if (++writes == 2) throw IOException("disco pieno")
+            if (++writes == 2) throw IOException("disk full")
             raf.write(buffer, offset, length)
         }
         override fun close() = raf.close()

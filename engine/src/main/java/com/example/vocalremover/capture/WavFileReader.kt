@@ -64,7 +64,7 @@ object WavFileReader {
 
     private fun readHeader(raf: RandomAccessFile, fileLength: Long): ParsedHeader {
         if (fileLength < HEADER_SIZE) {
-            throw UnsupportedWavFormatException("File WAV troppo corto: header incompleto")
+            throw UnsupportedWavFormatException("WAV file too short: incomplete header")
         }
 
         raf.seek(0)
@@ -79,22 +79,22 @@ object WavFileReader {
 
         val fmtChunkSize = header.int
         if (fmtChunkSize != 16) {
-            throw UnsupportedWavFormatException("Chunk fmt non supportato: atteso 16, trovato $fmtChunkSize")
+            throw UnsupportedWavFormatException("Unsupported fmt chunk: expected 16, found $fmtChunkSize")
         }
 
         val audioFormat = header.short.toInt() and 0xFFFF
         if (audioFormat != PCM_FORMAT) {
-            throw UnsupportedWavFormatException("Formato WAV non supportato: atteso PCM")
+            throw UnsupportedWavFormatException("Unsupported WAV format: expected PCM")
         }
 
         val channelCount = header.short.toInt() and 0xFFFF
         if (channelCount != EXPECTED_CHANNEL_COUNT) {
-            throw UnsupportedWavFormatException("Il file WAV deve essere stereo (2 canali)")
+            throw UnsupportedWavFormatException("WAV file must be stereo (2 channels)")
         }
 
         val sampleRate = header.int
         if (sampleRate != EXPECTED_SAMPLE_RATE) {
-            throw UnsupportedWavFormatException("Il file WAV temporaneo deve avere sample rate 44100 Hz")
+            throw UnsupportedWavFormatException("Temporary WAV file must have a 44100 Hz sample rate")
         }
 
         val byteRate = header.int
@@ -102,32 +102,32 @@ object WavFileReader {
         val bitsPerSample = header.short.toInt() and 0xFFFF
 
         if (bitsPerSample != EXPECTED_BITS_PER_SAMPLE) {
-            throw UnsupportedWavFormatException("Profondità campione non supportata: attesi 16 bit")
+            throw UnsupportedWavFormatException("Unsupported sample depth: expected 16 bits")
         }
 
         val expectedBlockAlign = EXPECTED_CHANNEL_COUNT * (EXPECTED_BITS_PER_SAMPLE / 8)
         if (blockAlign != expectedBlockAlign) {
-            throw UnsupportedWavFormatException("Block align WAV non valido: atteso $expectedBlockAlign")
+            throw UnsupportedWavFormatException("Invalid WAV block align: expected $expectedBlockAlign")
         }
 
         val expectedByteRate = EXPECTED_SAMPLE_RATE * expectedBlockAlign
         if (byteRate != expectedByteRate) {
-            throw UnsupportedWavFormatException("Byte rate WAV non valido: atteso $expectedByteRate")
+            throw UnsupportedWavFormatException("Invalid WAV byte rate: expected $expectedByteRate")
         }
 
         requireFourCc(header, expected = "data", label = "data")
         val dataSize = header.int
         if (dataSize < 0) {
-            throw UnsupportedWavFormatException("Dimensione chunk data non valida")
+            throw UnsupportedWavFormatException("Invalid data chunk size")
         }
         if (dataSize % blockAlign != 0) {
-            throw UnsupportedWavFormatException("Dimensione chunk data non allineata ai frame stereo")
+            throw UnsupportedWavFormatException("Data chunk size not aligned to stereo frames")
         }
         if (riffChunkSize != 36 + dataSize) {
-            throw UnsupportedWavFormatException("Dimensione RIFF incoerente con il chunk data")
+            throw UnsupportedWavFormatException("RIFF size inconsistent with the data chunk")
         }
         if (fileLength != HEADER_SIZE.toLong() + dataSize.toLong()) {
-            throw UnsupportedWavFormatException("Lunghezza file WAV incoerente con l'header")
+            throw UnsupportedWavFormatException("WAV file length inconsistent with its header")
         }
 
         return ParsedHeader(
@@ -141,7 +141,7 @@ object WavFileReader {
     private fun requireFourCc(buffer: ByteBuffer, expected: String, label: String) {
         val value = ByteArray(4).also(buffer::get).toString(Charsets.US_ASCII)
         if (value != expected) {
-            throw UnsupportedWavFormatException("Header WAV non valido: atteso $label, trovato $value")
+            throw UnsupportedWavFormatException("Invalid WAV header: expected $label, found $value")
         }
     }
 
@@ -149,7 +149,7 @@ object WavFileReader {
         val low = raf.read()
         val high = raf.read()
         if (low == -1 || high == -1) {
-            throw UnsupportedWavFormatException("Dati PCM16 WAV incompleti")
+            throw UnsupportedWavFormatException("Incomplete PCM16 WAV data")
         }
         return ((high shl 8) or low).toShort().toInt()
     }

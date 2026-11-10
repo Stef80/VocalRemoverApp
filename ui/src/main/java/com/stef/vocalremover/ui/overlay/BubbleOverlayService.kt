@@ -34,6 +34,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.example.vocalremover.capture.CaptureErrorCode
 import com.example.vocalremover.capture.CapturePackageDirectory
 import com.example.vocalremover.capture.CapturePackageSuggestions
 import com.example.vocalremover.capture.CaptureSessionController
@@ -124,8 +125,11 @@ class BubbleOverlayService : Service() {
                     onCaptureFailed(getString(R.string.bubble_error_capture_blocked))
                 SystemAudioCaptureService.ACTION_CAPTURE_ERROR ->
                     onCaptureFailed(
-                        intent.getStringExtra(SystemAudioCaptureService.EXTRA_ERROR_MESSAGE)
-                            ?: getString(R.string.bubble_error_capture_failed)
+                        getString(
+                            CaptureErrorCode.fromName(
+                                intent.getStringExtra(SystemAudioCaptureService.EXTRA_ERROR_CODE)
+                            ).messageRes()
+                        )
                     )
             }
         }

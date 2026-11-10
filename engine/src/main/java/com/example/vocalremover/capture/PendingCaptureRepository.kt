@@ -102,11 +102,11 @@ internal class DefaultPendingCaptureRepository(
     @Synchronized
     override fun saveEdit(displayName: String, startMs: Long, endMs: Long): PendingCapture {
         val name = displayName.trim()
-        require(name.isNotEmpty()) { "Nome vuoto" }
-        val result = checkNotNull(resultStore.peekStoppedResult()) { "Nessuna cattura in attesa" }
+        require(name.isNotEmpty()) { "Empty name" }
+        val result = checkNotNull(resultStore.peekStoppedResult()) { "No pending capture" }
         val raw = File(checkNotNull(result.outputPath))
         val durationMs = WavFileReader.durationMs(WavFileReader.readInfo(raw))
-        require(startMs in 0 until endMs && endMs <= durationMs) { "Intervallo non valido: $startMs..$endMs" }
+        require(startMs in 0 until endMs && endMs <= durationMs) { "Invalid range: $startMs..$endMs" }
         val previous = draftFor(result, durationMs)
 
         val trimmed = if (startMs == 0L && endMs == durationMs) {
@@ -205,7 +205,7 @@ internal class DefaultPendingCaptureRepository(
     }
 
     private fun currentRawFile(): File =
-        File(checkNotNull(resultStore.peekStoppedResult()?.outputPath) { "Nessuna cattura in attesa" })
+        File(checkNotNull(resultStore.peekStoppedResult()?.outputPath) { "No pending capture" })
 
     private fun draftFor(result: CaptureTerminalResult, durationMs: Long): CaptureDraft {
         val captureId = result.id

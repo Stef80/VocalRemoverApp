@@ -64,7 +64,7 @@ class SongProcessor(
      */
     suspend fun process(source: Uri, displayName: String): Uri {
         // Reject before touching the state: the state of the running processing stays consistent.
-        check(busy.compareAndSet(false, true)) { "Elaborazione già in corso" }
+        check(busy.compareAndSet(false, true)) { "Processing already in progress" }
         var phase = ProcessingError.DECODE_FAILED
         try {
             _state.value = ProcessingState.Decoding

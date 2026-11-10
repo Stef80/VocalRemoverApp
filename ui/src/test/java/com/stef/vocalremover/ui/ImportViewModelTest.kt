@@ -239,7 +239,7 @@ class ImportViewModelTest {
     @Test
     fun `save failure keeps editor open with EditFailed`() = runTest(dispatcher) {
         captures.capture = pending
-        captures.saveError = IOException("disco pieno")
+        captures.saveError = IOException("disk full")
         val vm = viewModel().apply { loadPendingCapture(openEditor = true) }
         val events = recordEvents(vm)
 

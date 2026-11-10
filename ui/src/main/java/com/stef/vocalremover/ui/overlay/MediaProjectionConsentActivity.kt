@@ -7,6 +7,7 @@ import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,6 +26,7 @@ import com.example.vocalremover.ui.R
 class MediaProjectionConsentActivity : ComponentActivity() {
 
     companion object {
+        private const val LOG_TAG = "CaptureConsent"
         const val EXTRA_TARGET_UID = "target_uid"
         const val EXTRA_SUCCESS = "success"
         const val EXTRA_MESSAGE = "message"
@@ -76,7 +78,8 @@ class MediaProjectionConsentActivity : ComponentActivity() {
             captureSessionController.startCapture(result.resultCode, result.data!!, targetUid)
             finishWithSuccess()
         } catch (error: Exception) {
-            finishWithFailure(error.message ?: getString(R.string.consent_error_service_start_failed))
+            Log.w(LOG_TAG, "Cannot start the capture service", error)
+            finishWithFailure(getString(R.string.consent_error_service_start_failed))
         }
     }
 
