@@ -31,18 +31,6 @@
 
     <application>
 
-        <!-- Previous XML screen: the launcher is now the Compose MainActivity in :ui -->
-        <activity
-            android:name=".MainActivity"
-            android:exported="true">
-            <!-- Handles audio files shared from other apps -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="audio/*" />
-            </intent-filter>
-        </activity>
-
         <service
             android:name=".capture.SystemAudioCaptureService"
             android:exported="false"

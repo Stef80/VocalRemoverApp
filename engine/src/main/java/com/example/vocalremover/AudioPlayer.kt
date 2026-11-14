@@ -128,7 +128,7 @@ class AudioPlayer(private val context: Context) {
         }
     }
 
-    /** Decoding errors → null: the legacy MainActivity shows its usual generic message. */
+    /** Decoding errors → null: the caller shows its usual generic message. */
     private fun decodeOrNull(uri: Uri): StereoPcm? = try {
         decoder.decode(uri)
     } catch (e: DecodeException) {

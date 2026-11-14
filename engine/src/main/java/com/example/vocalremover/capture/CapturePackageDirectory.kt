@@ -7,9 +7,8 @@ import org.xmlpull.v1.XmlPullParser
 
 /**
  * Reads/writes the candidate and recent packages for the source app picker
- * to capture. Shared between the old XML screen (`MainActivity`) and the
- * floating widget (`BubbleOverlayService`) so that access to
- * PackageManager/SharedPreferences/AndroidManifest is not duplicated in two places.
+ * to capture, used by the floating widget (`BubbleOverlayService`) so that access to
+ * PackageManager/SharedPreferences/AndroidManifest stays in one place.
  */
 class CapturePackageDirectory(private val context: Context) {
 

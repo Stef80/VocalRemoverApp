@@ -15,8 +15,7 @@ import androidx.core.content.ContextCompat
  * audio from the source app": every entry point that wants to start or stop
  * `SystemAudioCaptureService` must go through here instead of building its own
  * Intents to the service, so the logic does not diverge between entry
- * points (e.g. the floating widget in `:ui` and the legacy MainActivity in
- * `:engine`, kept only as a reference and slated for removal).
+ * points (e.g. the floating widget in `:ui`).
  */
 class CaptureSessionController(context: Context) {
 

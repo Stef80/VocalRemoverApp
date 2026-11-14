@@ -2,9 +2,8 @@ package com.example.vocalremover.capture
 
 /**
  * Pure logic (no Android dependencies) to sort and decode the
- * package suggestions used by the source app picker, shared
- * between the old XML screen (`MainActivity`) and the floating widget
- * (`BubbleOverlayService`), so the sorting is not duplicated in two places.
+ * package suggestions used by the source app picker in the floating
+ * widget (`BubbleOverlayService`).
  */
 object CapturePackageSuggestions {
 
