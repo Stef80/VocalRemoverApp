@@ -17,22 +17,6 @@ android {
         getByName("test").java.srcDir("src/benchmarkShared/java")
     }
 
-    flavorDimensions += "backend"
-    productFlavors {
-        create("cpu") {
-            dimension = "backend"
-            buildConfigField("String", "EXECUTION_BACKEND", "\"cpu\"")
-        }
-        create("webgpu") {
-            dimension = "backend"
-            buildConfigField("String", "EXECUTION_BACKEND", "\"webgpu\"")
-        }
-        create("qnn") {
-            dimension = "backend"
-            buildConfigField("String", "EXECUTION_BACKEND", "\"qnn\"")
-        }
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -74,12 +58,11 @@ dependencies {
     // uses MDX-Net models already converted to .onnx by the UVR community)
     // v1.23.0+ required: also aligns the JNI wrapper to 16 KB pages
     // (mandatory for Google Play on Android 15+ since November 1st, 2025)
-    // The qnn variant uses the package with the QNN EP (same Java API, includes the
-    // com.qualcomm.qti:qnn-runtime dependency); the two AARs cannot share one APK.
-    "cpuImplementation"("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
-    "webgpuImplementation"("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
-    "qnnImplementation"("com.microsoft.onnxruntime:onnxruntime-android-qnn:1.24.3")
-
+    // A single custom AAR with the CPU, WebGPU and QNN EPs: the official onnxruntime-android
+    // (WebGPU) and onnxruntime-android-qnn packages cannot share one APK, and the app picks the
+    // backend at runtime. Built from source by scripts/build-ort-aar.sh into third_party/maven;
+    // same Java API, and its POM pulls com.qualcomm.qti:qnn-runtime from Maven Central.
+    implementation("com.stef.vocalremover.thirdparty:onnxruntime-android-vr:1.24.3")
 
     // TarsosDSP removed: decoding handled with native MediaExtractor/MediaCodec
 

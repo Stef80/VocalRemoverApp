@@ -33,7 +33,7 @@ data class StereoPcm(
 
 class VocalRemover(
     context: Context,
-    private val backend: ExecutionBackend = ExecutionBackend.fromId(BuildConfig.EXECUTION_BACKEND)
+    private val backend: ExecutionBackend
 ) {
 
     private class Loaded(val session: OrtSession, val inputName: String, val outputName: String)

@@ -6,10 +6,10 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.example.vocalremover.BuildConfig
 import com.example.vocalremover.ExecutionBackend
 import com.example.vocalremover.StereoPcm
 import com.example.vocalremover.VocalRemover
+import com.example.vocalremover.backend.BackendCandidates
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -18,13 +18,14 @@ import java.io.File
 import java.util.Locale
 
 /**
- * Measures timings and correctness of the installed flavor's backend on the current device.
+ * Measures timings and correctness of one execution backend on the current device.
  *
  * The output is compared with that of the CPU EP (quality reference) computed in the
  * same process: a backend that produces ruined audio (like WebGPU on Realme RMX3301)
  * fails the test even if it does not crash.
  *
- * Optional arguments (`-e name value`): durationSec (default 20), minSnrDb (default 20).
+ * Optional arguments (`-e name value`): backend (cpu|webgpu|qnn|auto, default auto),
+ * durationSec (default 20), minSnrDb (default 20).
  * Result: logcat line with tag VRBenchmark and file
  * /sdcard/Android/data/<applicationId>/files/benchmark/report-<backend>.json
  */
@@ -38,7 +39,13 @@ class BackendBenchmarkTest {
         val args = InstrumentationRegistry.getArguments()
         val durationSec = args.getString("durationSec")?.toDouble() ?: 20.0
         val minSnrDb = args.getString("minSnrDb")?.toDouble() ?: 20.0
-        val backend = ExecutionBackend.fromId(BuildConfig.EXECUTION_BACKEND)
+        val backendArg = args.getString("backend") ?: "auto"
+        // auto: for now the first candidate for this SoC.
+        val backend = if (backendArg == "auto") {
+            BackendCandidates.forThisDevice().first()
+        } else {
+            ExecutionBackend.fromId(backendArg)
+        }
 
         val (left, right) = SyntheticStereoSignal.generate(durationSec, SAMPLE_RATE, seed = 42)
         val input = StereoPcm(left, right)

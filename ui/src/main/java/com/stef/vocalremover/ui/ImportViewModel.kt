@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.vocalremover.VocalRemover
+import com.example.vocalremover.backend.BackendCandidates
 import com.example.vocalremover.capture.PendingCapture
 import com.example.vocalremover.capture.PendingCaptureRepository
 import com.example.vocalremover.capture.RecordingFileNaming
@@ -399,7 +400,8 @@ class ImportViewModel(
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = checkNotNull(this[APPLICATION_KEY])
-                val remover = VocalRemover(app)
+                // Temporary: the first candidate, until runtime backend selection is wired in.
+                val remover = VocalRemover(app, BackendCandidates.forThisDevice().first())
                 ImportViewModel(
                     captures = PendingCaptureRepository.create(app),
                     processor = SongProcessor.create(app, remover),

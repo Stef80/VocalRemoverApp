@@ -31,6 +31,11 @@
 
     <application>
 
+        <!-- QNN HTP: access to the DSP FastRPC library (mandatory since Android 12). -->
+        <uses-native-library
+            android:name="libcdsprpc.so"
+            android:required="false" />
+
         <service
             android:name=".capture.SystemAudioCaptureService"
             android:exported="false"

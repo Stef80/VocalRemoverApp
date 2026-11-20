@@ -14,36 +14,53 @@ Il file è elencato in `.gitignore` (pattern `*.onnx`): resterà sul tuo disco m
 
 ## Build
 
+Prerequisito Firebase: serve `ui/google-services.json` (non è nel repository, è in `.gitignore`)
+con il client `com.stef.vocalremover`. Senza questo file la build fallisce al task
+`processDebugGoogleServices`: scaricalo dalla console Firebase.
+
 ```bash
-gradle :ui:assembleCpuDebug :ui:assembleWebgpuDebug :ui:assembleQnnDebug
+gradle :ui:assembleDebug
+gradle :engine:testDebugUnitTest :ui:testDebugUnitTest
 ```
 
-Moduli: `:ui` è il modulo application (APK, launcher Compose `MainActivity`, flavor con gli
-application ID); `:engine` è la library con decodifica, inferenza ONNX, cattura e la schermata XML
-precedente, con gli stessi flavor `cpu`/`webgpu`/`qnn` che selezionano il backend.
+Moduli: `:ui` è il modulo application (APK unico `ui/build/outputs/apk/debug/ui-debug.apk`,
+launcher Compose `MainActivity`, application ID `com.stef.vocalremover`, solo `arm64-v8a`);
+`:engine` è la library con decodifica, inferenza ONNX, cattura e la schermata XML precedente.
+Non ci sono più flavor: c'è una sola app e il backend (CPU, WebGPU o QNN) si sceglie a runtime
+in base al SoC del dispositivo.
 
-## Confronto CPU/WebGPU
+## ONNX Runtime (AAR personalizzato)
 
-Installa entrambe le build debug sullo stesso dispositivo per confrontare i backend.
-Gli APK sono in `ui/build/outputs/apk/cpu/debug/` e `ui/build/outputs/apk/webgpu/debug/`.
-Hanno application ID distinti (`.cpu` e `.webgpu`), quindi cache separate. Usa lo stesso file
-audio e lo stesso modello per entrambe. Ascolta e confronta prima la CPU; se WebGPU rovina l'audio, non usarlo su
-quel dispositivo. Nessun backend viene promosso in base alla sola velocità. I test unitari si
-eseguono con `gradle :engine:testCpuDebugUnitTest :engine:testWebgpuDebugUnitTest`.
+Le AAR ufficiali `onnxruntime-android` (con WebGPU) e `onnxruntime-android-qnn` non possono stare
+nello stesso APK, quindi l'app usa un'unica AAR compilata dai sorgenti con i tre execution provider
+(CPU, WebGPU, QNN): `com.stef.vocalremover.thirdparty:onnxruntime-android-vr:1.24.3`, nel repository
+Maven locale `third_party/maven` (già nel repo). Stessa API Java delle AAR ufficiali; il POM
+dipende da `com.qualcomm.qti:qnn-runtime` su Maven Central. Per ricompilarla:
 
-## Flavor QNN (NPU Snapdragon)
+```bash
+scripts/build-ort-aar.sh     # scarica QAIRT SDK, NDK e JDK 17 se mancano; passi già fatti vengono saltati
+```
 
-Il flavor `qnn` (`.qnn`) usa l'NPU Hexagon tramite `onnxruntime-android-qnn:1.24.3`. È pensato solo
-per SoC Qualcomm (testato su Realme RMX3301, Snapdragon 8 Gen 1): circa 0,25 s per chunk contro circa
+## Confronto dei backend
+
+Il backend CPU è il riferimento di qualità. Per confrontare i backend usa lo stesso file audio e lo
+stesso modello, ascolta e confronta prima la CPU; se WebGPU rovina l'audio, non usarlo su quel
+dispositivo. Nessun backend viene promosso in base alla sola velocità.
+
+## QNN (NPU Snapdragon)
+
+Il backend `qnn` usa l'NPU Hexagon ed è disponibile solo su SoC Qualcomm (testato su Realme
+RMX3301, Snapdragon 8 Gen 1): circa 0,25 s per chunk contro circa
 6 s della CPU, 8 s di inferenza per un brano di 3,5 minuti, outputPeak uguale alla CPU (0,4809 contro 0,4807).
 Al primo avvio dopo l'installazione l'app compila il grafo HTP in background (~30 s) e lo salva in
 `files/qnn_ctx_<installTime>.onnx` (~42 MB). Dagli avvii successivi la sessione si apre in ~0,3 s.
-Su dispositivi non Qualcomm usa le build `cpu` o `webgpu`.
+Sui dispositivi non Qualcomm si usano WebGPU o CPU.
 
 ## Benchmark su dispositivo (`BackendBenchmarkTest`)
 
 Test di strumentazione che elabora un brano sintetico deterministico (20 s, nessun file audio nel
-repo) con il backend del flavor installato e lo confronta con la CPU nello stesso processo. Misura
+repo) con il backend scelto (argomento `backend`: `cpu`, `webgpu`, `qnn` oppure `auto`, il
+default, che usa il primo candidato per il dispositivo) e lo confronta con la CPU nello stesso processo. Misura
 caricamento sessione, tempo di elaborazione e SNR rispetto alla CPU, e fallisce se l'uscita ha
 NaN/Inf, è silenziosa o ha SNR < 20 dB. In questo modo coglie anche i backend che producono audio
 rovinato senza andare in crash (WebGPU su Realme RMX3301: 2 dB).
@@ -53,21 +70,22 @@ Valori misurati: Realme qnn 3,3 s (CPU 85 s), SNR 63,5 dB; OPPO webgpu 21 s (CPU
 In locale, con il telefono collegato via adb:
 
 ```bash
-gradle :ui:connectedQnnDebugAndroidTest      # oppure Cpu / Webgpu
+gradle :ui:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.backend=qnn
 # argomenti opzionali: -Pandroid.testInstrumentationRunnerArguments.durationSec=10
 #                      -Pandroid.testInstrumentationRunnerArguments.minSnrDb=25
 ```
 
 Il risultato è una riga JSON nel logcat (tag `VRBenchmark`). Con Gradle viene copiato anche in
-`ui/build/outputs/connected_android_test_additional_output/<flavor>DebugAndroidTest/connected/<dispositivo>/`
+`ui/build/outputs/connected_android_test_additional_output/debugAndroidTest/connected/<dispositivo>/`
 (Gradle disinstalla l'app a fine test). Con `adb shell am instrument` resta invece in
-`/sdcard/Android/data/com.example.vocalremover.<flavor>/files/benchmark/report-<flavor>.json`.
+`/sdcard/Android/data/com.stef.vocalremover/files/benchmark/report-<backend>.json`.
 Con qnn su installazione pulita `sessionLoadMs` include la compilazione HTP (~50 s, una tantum).
 
 Su dispositivi che non possiedi, usa Firebase Test Lab (telefoni reali). Lo script compila gli APK,
 lancia il test su un elenco di dispositivi scelti per SoC e scarica i report in `build/testlab/`:
 
 ```bash
+scripts/run-testlab.sh auto              # 5 telefoni (limite giornaliero Spark), backend scelto dall'app
 scripts/run-testlab.sh webgpu            # Exynos 2400, Tensor G4, Dimensity 6300, SD 8 Gen 2/3
 scripts/run-testlab.sh qnn               # solo Snapdragon: S23, S24 (Snapdragon), S25
 scripts/run-testlab.sh webgpu --dry-run  # mostra il comando gcloud senza lanciarlo
@@ -77,19 +95,19 @@ DEVICES="frankel:36 r0q:36" DURATION_SEC=10 scripts/run-testlab.sh webgpu
 Piano Spark: 5 test fisici al giorno, uno per dispositivo. Equivalente manuale:
 
 ```bash
-gradle :ui:assembleQnnDebug :ui:assembleQnnDebugAndroidTest
+gradle :ui:assembleDebug :ui:assembleDebugAndroidTest
 gcloud firebase test android models list            # elenco dei modelli disponibili
 gcloud firebase test android run --type instrumentation \
-  --app  ui/build/outputs/apk/qnn/debug/ui-qnn-debug.apk \
-  --test ui/build/outputs/apk/androidTest/qnn/debug/ui-qnn-debug-androidTest.apk \
+  --app  ui/build/outputs/apk/debug/ui-debug.apk \
+  --test ui/build/outputs/apk/androidTest/debug/ui-debug-androidTest.apk \
   --device model=<MODELLO>,version=<API> --device model=<ALTRO>,version=<API> \
-  --environment-variables durationSec=20 \
-  --directories-to-pull /sdcard/Android/data/com.example.vocalremover.qnn/files \
+  --environment-variables backend=qnn,durationSec=20 \
+  --directories-to-pull /sdcard/Android/data/com.stef.vocalremover/files \
   --timeout 20m
 ```
 
-Per i SoC Snapdragon (flavor `qnn`) è disponibile anche Qualcomm Device Cloud, dove gli stessi APK
-si installano e si lanciano via adb con `adb shell am instrument -w -r
-com.example.vocalremover.qnn.test/androidx.test.runner.AndroidJUnitRunner`.
+Per i SoC Snapdragon è disponibile anche Qualcomm Device Cloud, dove gli stessi APK
+si installano e si lanciano via adb con `adb shell am instrument -w -r -e backend qnn
+com.stef.vocalremover.test/androidx.test.runner.AndroidJUnitRunner`.
 
 Vedi `.github/copilot-instructions.md` per i dettagli sull'architettura della pipeline audio.

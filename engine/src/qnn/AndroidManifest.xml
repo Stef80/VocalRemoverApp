@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
-        <!-- QNN HTP: access to the DSP FastRPC library (mandatory since Android 12). -->
-        <uses-native-library
-            android:name="libcdsprpc.so"
-            android:required="false" />
-    </application>
-</manifest>

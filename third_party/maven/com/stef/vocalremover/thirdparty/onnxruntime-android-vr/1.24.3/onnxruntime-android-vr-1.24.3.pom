@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.stef.vocalremover.thirdparty</groupId>
+  <artifactId>onnxruntime-android-vr</artifactId>
+  <version>1.24.3</version>
+  <packaging>aar</packaging>
+  <name>onnxruntime-qnn</name>
+  <description>ONNX Runtime is a performance-focused inference engine for ONNX (Open Neural Network Exchange) models. This package contains the Android (aar) build of ONNX Runtime with the QNN Execution Provider.It includes support for all types and operators, for ONNX format models. All standard ONNX models can be executedwith this package.</description>
+  <url>https://microsoft.github.io/onnxruntime/</url>
+  <organization>
+    <name>Microsoft</name>
+    <url>http://www.microsoft.com</url>
+  </organization>
+  <licenses>
+    <license>
+      <name>MIT License</name>
+      <url>https://opensource.org/licenses/MIT</url>
+    </license>
+  </licenses>
+  <developers>
+    <developer>
+      <id>onnxruntime</id>
+      <name>ONNX Runtime</name>
+      <email>onnxruntime@microsoft.com</email>
+    </developer>
+  </developers>
+  <scm>
+    <connection>scm:git:git://github.com:microsoft/onnxruntime.git</connection>
+    <developerConnection>scm:git:ssh://github.com/microsoft/onnxruntime.git</developerConnection>
+    <url>http://github.com/microsoft/onnxruntime</url>
+  </scm>
+  <dependencies>
+    <dependency>
+      <groupId>com.qualcomm.qti</groupId>
+      <artifactId>qnn-runtime</artifactId>
+      <version>2.42.0</version>
+    </dependency>
+  </dependencies>
+</project>

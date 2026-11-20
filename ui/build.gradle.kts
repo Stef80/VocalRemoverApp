@@ -10,35 +10,20 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.example.vocalremover"
+        applicationId = "com.stef.vocalremover"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     // Benchmark helpers shared with :engine's JVM tests: they never ship in the app APK.
     sourceSets {
         getByName("androidTest").java.srcDir("../engine/src/benchmarkShared/java")
-    }
-
-    // Same dimension/names as :engine's flavors: each app variant uses the backend of the same name.
-    flavorDimensions += "backend"
-    productFlavors {
-        create("cpu") {
-            dimension = "backend"
-            applicationIdSuffix = ".cpu"
-        }
-        create("webgpu") {
-            dimension = "backend"
-            applicationIdSuffix = ".webgpu"
-        }
-        create("qnn") {
-            dimension = "backend"
-            applicationIdSuffix = ".qnn"
-        }
     }
 
     buildTypes {
@@ -75,14 +60,9 @@ android {
     packaging {
         jniLibs {
             pickFirsts += listOf("**/libc++_shared.so")
+            // QNN: libraries must be extracted to disk so that the DSP can load the Skels.
+            useLegacyPackaging = true
         }
-    }
-}
-
-androidComponents {
-    onVariants(selector().withFlavor("backend" to "qnn")) { variant ->
-        // QNN: libraries must be extracted to disk so that the DSP can load the Skels.
-        variant.packaging.jniLibs.useLegacyPackaging.set(true)
     }
 }
 

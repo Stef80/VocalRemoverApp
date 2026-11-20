@@ -22,47 +22,49 @@ Do not force-add model files; keep them local.
 This repository is an Android app built with Gradle Kotlin DSL (`build.gradle.kts`, `ui/build.gradle.kts`,
 `engine/build.gradle.kts`). Modules:
 - `:ui` — the **application** module: produces the APKs, owns the launcher (Compose
-  `com.stef.vocalremover.ui.MainActivity`, namespace `com.example.vocalremover.ui`), the
-  `cpu`/`webgpu`/`qnn` flavors with their `applicationIdSuffix`, QNN legacy JNI packaging,
-  `google-services.json`, and the on-device `androidTest` benchmark. Depends on `:engine`.
+  `com.stef.vocalremover.ui.MainActivity`, namespace `com.example.vocalremover.ui`), the single
+  `applicationId` `com.stef.vocalremover` (arm64-v8a only), legacy JNI packaging,
+  `google-services.json` (gitignored; must contain the client `com.stef.vocalremover`), and the
+  on-device `androidTest` benchmark. Depends on `:engine`.
 - `:engine` — Android **library** (namespace `com.example.vocalremover`): decoding, ONNX inference,
   capture, the model asset, JVM unit tests, and the previous XML/ViewBinding
   `com.example.vocalremover.MainActivity` (opened from the Compose launcher until it is migrated and
-  removed). Has the same `backend` flavors (selecting ORT dependency and `BuildConfig.EXECUTION_BACKEND`).
-  `:engine` must never depend on `:ui`.
+  removed). There are no product flavors: the execution backend is chosen at runtime
+  (`backend/BackendCandidates` lists the candidates for the device's SoC, best first) and passed
+  to `VocalRemover(context, backend)`. `:engine` must never depend on `:ui`.
 - Both use `compileSdk = 37` (needed by Compose BOM 2026.08+ / lifecycle-compose 2.11); `targetSdk` stays 36.
 
 Use Gradle from the repo root:
 
 ```bash
-gradle :ui:assembleCpuDebug :ui:assembleWebgpuDebug :ui:assembleQnnDebug
-gradle :ui:lintCpuDebug :ui:lintWebgpuDebug :ui:lintQnnDebug :engine:lintCpuDebug
-gradle :engine:testCpuDebugUnitTest :engine:testWebgpuDebugUnitTest :engine:testQnnDebugUnitTest
+gradle :ui:assembleDebug
+gradle :ui:lintDebug :engine:lintDebug
+gradle :engine:testDebugUnitTest :ui:testDebugUnitTest
 ```
 
 Run a single unit test method:
 
 ```bash
-gradle :engine:testCpuDebugUnitTest :engine:testWebgpuDebugUnitTest --tests "com.example.vocalremover.YourTestClass.yourTestMethod"
+gradle :engine:testDebugUnitTest --tests "com.example.vocalremover.YourTestClass.yourTestMethod"
 ```
 
 If instrumentation tests are added/updated:
 
 ```bash
-gradle :ui:connectedCpuDebugAndroidTest :ui:connectedWebgpuDebugAndroidTest :ui:connectedQnnDebugAndroidTest
+gradle :ui:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.backend=qnn  # cpu|webgpu|qnn|auto
 ```
 
 `BackendBenchmarkTest` (`ui/src/androidTest`) is the on-device benchmark: it processes a deterministic
-synthetic stereo signal with the flavor's backend, compares it against an in-process CPU-EP
+synthetic stereo signal with the backend given by the `backend` argument (`cpu`/`webgpu`/`qnn`,
+or `auto`, the default: the first candidate for the device), compares it against an in-process CPU-EP
 reference (`VocalRemover(context, ExecutionBackend.CPU)`), and fails on NaN/Inf, silence, or
 SNR < 20 dB. It reports a JSON line (logcat tag `VRBenchmark` and
-`files/benchmark/report-<flavor>.json`), runnable on Firebase Test Lab (see `README.md`). Its pure
+`files/benchmark/report-<backend>.json`), runnable on Firebase Test Lab (see `README.md`). Its pure
 helpers (`BenchmarkMetrics`, `SyntheticStereoSignal`, `BenchmarkReport`) live in
 `engine/src/benchmarkShared/java`, a source dir shared by `:engine` `test` and `:ui` `androidTest` only, so they never
 ship in the app APK.
 
-The `cpuDebug` and `webgpuDebug` flavors use separate application IDs and model caches. The
-`cpu` flavor uses ORT's default CPU EP: XNNPACK was measured slower on Realme RMX3301 and crashed
+The CPU backend uses ORT's default CPU EP: XNNPACK was measured slower on Realme RMX3301 and crashed
 natively inside `session.run` on OPPO CPH2791. Also measured without useful gains (2026-10, do not
 retry without a new idea):
 - Intra-op thread count (`setIntraOpNumThreads`): on Test Lab, the best explicit value was within
@@ -74,13 +76,20 @@ Keep CPU as the quality baseline; WebGPU is device-specific and must not be sele
 speed alone. Compare backends on the same device with the same input and listen to both results.
 Follow the existing logging pattern and remove temporary benchmark instrumentation after use.
 
-The `qnn` flavor (Qualcomm NPU/HTP, `onnxruntime-android-qnn:1.24.3`, which cannot share an APK
-with `onnxruntime-android`, hence per-flavor dependencies) needs all of the following. Each one was
+ONNX Runtime is a single custom AAR, `com.stef.vocalremover.thirdparty:onnxruntime-android-vr:1.24.3`,
+with the CPU, WebGPU and QNN EPs in one package: the official `onnxruntime-android` (WebGPU) and
+`onnxruntime-android-qnn` cannot share an APK. `scripts/build-ort-aar.sh` builds it from source into
+`third_party/maven` (the first repository in `settings.gradle.kts`, restricted to the
+`com.stef.vocalremover.thirdparty` group); it has the same Java API and its POM depends on
+`com.qualcomm.qti:qnn-runtime` from Maven Central.
+
+The QNN backend (Qualcomm NPU/HTP) needs all of the following. Each one was
 required on Realme RMX3301 (SM8450, HTP v69):
-- `engine/src/qnn/AndroidManifest.xml` declares `<uses-native-library android:name="libcdsprpc.so">`.
+- `engine/src/main/AndroidManifest.xml` declares `<uses-native-library android:name="libcdsprpc.so">`
+  (`required="false"`, so non-Qualcomm devices still install the app).
   Without it the HTP stub fails with `libcdsprpc.so not found` and ORT silently falls back to CPU.
   Do not override `ADSP_LIBRARY_PATH`.
-- Legacy JNI packaging (`useLegacyPackaging`, in `ui/build.gradle.kts`) is enabled only for the qnn variant, so that
+- Legacy JNI packaging (`useLegacyPackaging`, in `ui/build.gradle.kts`) is enabled for the whole app, so that
   `libQnnHtp.so` and the Skel libraries exist on disk in `nativeLibraryDir`.
 - `setSymbolicDimensionValue("batch_size", 1)`: the model has a symbolic batch dimension and no
   `value_info`, and without this QNN rejects every node with "Cannot get shape".
@@ -96,7 +105,7 @@ The app pipeline is:
 1. `:ui` `MainActivity` (Compose) is the launcher; for now it only opens the previous `:engine` `MainActivity`, which handles permissions, file selection, UI state, and player controls.
 2. `AudioPlayer` decodes input audio (`MediaExtractor` + `MediaCodec`) into true stereo float PCM at 44.1kHz (`StereoPcm`, no premature downmix), calls vocal-removal processing, and downmixes to mono only right before playback with `AudioTrack`.
 3. For system-audio capture, the engine activity obtains MediaProjection consent and starts `SystemAudioCaptureService`; the service writes captured stereo PCM to a temporary WAV, and the activity consumes the terminal result, reads the WAV, and coordinates processing/saving.
-4. `VocalRemover` runs model inference with **ONNX Runtime** (`onnxruntime-android:1.24.3`) using the stereo-aware **UVR-MDX-NET-Inst_HQ_5** ONNX model (`vocal_remover_fp32.onnx`):
+4. `VocalRemover` runs model inference with **ONNX Runtime** (custom `onnxruntime-android-vr:1.24.3` AAR) using the stereo-aware **UVR-MDX-NET-Inst_HQ_5** ONNX model (`vocal_remover_fp32.onnx`):
    - The model outputs the **instrumental's complex spectrum directly** (no ratio-mask step, unlike the old Open-Unmix pipeline) — ONNX inference output goes straight into ISTFT.
    - `MdxStftProcessor` implements the model's exact **centered/reflect-padded STFT/ISTFT** convention (`n_fft=5120`, `hop_length=1024`, `dim_f=2560` frequency-bin crop) required by MDX-Net. Since `n_fft=5120 = 5·1024` is not a power of 2, it uses `MixedRadixFft` (radix-5 × table-driven radix-2, ~15x faster than Bluestein); other lengths (e.g. `n_fft=6` in tests) fall back to `BluesteinFft`. The pipeline calls `forwardStereoInto`/`inverseStereoInto`, which pack L and R into one complex FFT per frame (`z = L + i·R`) and must stay numerically identical to two per-channel `forwardInto`/`inverseInto` calls (see `MdxStftStereoTest`).
    - `MdxChunker` implements the reference tool's outer 25%-overlap waveform chunking (fixed `chunkSize = hopLength*(dimT-1)` samples per ONNX call, since the graph has a fixed `dim_t=256` frame constraint), overlap-added with a **symmetric** Hann window (`numpy.hanning` formula, denominator `len-1` — distinct from the STFT's **periodic** Hann window, denominator `nFft`). `processStereo` drives both channels in lockstep since the model takes a single joint 4-channel tensor (`[L_re, L_im, R_re, R_im]`) per chunk, not two independent per-channel passes.
@@ -121,4 +130,4 @@ Related offline tooling (deprecated, kept for reference only):
 - `AudioPlayer` is the orchestration boundary for decode/process/playback:
   - callbacks (`onProgress`, `onReady`, `onError`, `onPlaybackPositionChanged`) are the integration contract with `MainActivity`.
 - In `:ui`, never hard-code user-visible text (labels, statuses, Toasts, error messages, notifications): put it in `ui/src/main/res/values/strings.xml` and read it with `stringResource` (composables) or `getString` (Activities/Services). Only the legacy `:engine` UI still uses direct string literals (mostly Italian); leave it as is.
-- `onnxruntime-android` must stay at **1.24.3+** to satisfy the Android 16KB page size requirement (both `libonnxruntime.so` and `libonnxruntime4j_jni.so` must be 16KB-aligned; versions before 1.23.0 have a misaligned JNI lib). Verify alignment via `unzip -p app-debug.apk lib/arm64-v8a/lib*.so > /tmp/lib.so && readelf -lW /tmp/lib.so | awk '/LOAD/{print $NF}' | sort -u` (look for `0x4000`).
+- ONNX Runtime (`onnxruntime-android-vr`) must stay at **1.24.3+** to satisfy the Android 16KB page size requirement (both `libonnxruntime.so` and `libonnxruntime4j_jni.so` must be 16KB-aligned; versions before 1.23.0 have a misaligned JNI lib). Verify alignment via `unzip -p app-debug.apk lib/arm64-v8a/lib*.so > /tmp/lib.so && readelf -lW /tmp/lib.so | awk '/LOAD/{print $NF}' | sort -u` (look for `0x4000`).

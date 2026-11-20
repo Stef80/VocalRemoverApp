@@ -12,6 +12,11 @@ plugins {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        // Custom ONNX Runtime AAR (CPU + WebGPU + QNN EPs), built by scripts/build-ort-aar.sh.
+        maven {
+            url = uri(settingsDir.resolve("third_party/maven"))
+            content { includeGroup("com.stef.vocalremover.thirdparty") }
+        }
         google()
         mavenCentral()
         maven { url = uri("https://jitpack.io") }
