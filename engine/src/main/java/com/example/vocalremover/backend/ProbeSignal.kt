@@ -1,6 +1,7 @@
 package com.example.vocalremover.backend
 
 import com.example.vocalremover.StereoPcm
+import com.example.vocalremover.VocalRemover
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.exp
@@ -16,8 +17,8 @@ object ProbeSignal {
 
     const val SAMPLE_RATE = 44100
 
-    /** One model chunk: hop * (DIM_T - 1) = 1024 * 255 frames. */
-    const val FRAMES = 261_120
+    /** One model chunk: hop * (DIM_T - 1) = 1024 * 255 frames, fed to the model as-is (no chunker). */
+    const val FRAMES = VocalRemover.CHUNK_FRAMES
 
     private const val SEED = 42
     private const val TARGET_PEAK = 0.8f

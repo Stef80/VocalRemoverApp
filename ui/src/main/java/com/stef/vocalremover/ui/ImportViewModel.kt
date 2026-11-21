@@ -385,6 +385,7 @@ class ImportViewModel(
     private fun phaseOf(state: ProcessingState): ProcessingPhase? = when (state) {
         ProcessingState.Decoding -> ProcessingPhase.Decoding
         ProcessingState.PreparingBackend -> ProcessingPhase.PreparingBackend
+        ProcessingState.RetryingBackend -> ProcessingPhase.RetryingBackend
         is ProcessingState.Processing -> ProcessingPhase.Running(state.percent)
         ProcessingState.Saving -> ProcessingPhase.Saving
         else -> null

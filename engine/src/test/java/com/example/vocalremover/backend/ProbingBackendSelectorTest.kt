@@ -1,5 +1,6 @@
 package com.example.vocalremover.backend
 
+import ai.onnxruntime.OrtException
 import com.example.vocalremover.ExecutionBackend
 import com.example.vocalremover.ExecutionBackend.CPU
 import com.example.vocalremover.ExecutionBackend.QNN
@@ -24,10 +25,17 @@ class ProbingBackendSelectorTest {
     private class FakeProber(
         private val results: Map<ExecutionBackend, ProbeResult> = emptyMap(),
         private val throwing: Set<ExecutionBackend> = emptySet(),
-        private val error: Throwable = IllegalStateException("boom"),
+        private val error: Throwable = OrtException("boom"),
     ) : BackendProber {
         val calls = mutableListOf<ExecutionBackend>()
         var onProbe: (ExecutionBackend) -> Unit = {}
+        var prepareError: Throwable? = null
+        var prepareCalls = 0
+
+        override suspend fun prepare() {
+            prepareCalls++
+            prepareError?.let { throw it }
+        }
 
         override suspend fun probe(backend: ExecutionBackend): ProbeResult {
             calls += backend
@@ -39,8 +47,16 @@ class ProbingBackendSelectorTest {
     }
 
     private class InMemoryStore(var value: BackendChoice? = null) : BackendChoiceStore {
+        /** inProgress value of each saveNow (synchronous) write. */
+        val durableWrites = mutableListOf<ExecutionBackend?>()
+
         override fun load() = value
         override fun save(choice: BackendChoice) {
+            value = choice
+        }
+
+        override fun saveNow(choice: BackendChoice) {
+            durableWrites += choice.inProgress
             value = choice
         }
     }
@@ -256,5 +272,98 @@ class ProbingBackendSelectorTest {
         )
         assertEquals(CPU, selector(listOf(QNN, CPU), prober, store).current())
         assertTrue(store.value!!.failed.getValue(QNN).contains("UnsatisfiedLinkError"))
+    }
+
+    @Test
+    fun `io failure during a probe is inconclusive and probed again on the next start`() = runTest {
+        val store = InMemoryStore()
+        val results = mapOf(WEBGPU to passed(1500), CPU to passed(6000))
+        val first = FakeProber(results, throwing = setOf(QNN), error = java.io.IOException("No space left on device"))
+        val sel = selector(all, first, store)
+
+        // This run uses the best backend that did pass, without persisting it.
+        assertEquals(WEBGPU, sel.current())
+        assertFalse(store.value!!.failed.containsKey(QNN))
+        assertNull(store.value!!.chosen)
+        assertNull(store.value!!.inProgress)
+        // Same process: no second probe.
+        assertTrue(sel.isReady())
+        assertEquals(WEBGPU, sel.current())
+        assertEquals(listOf(QNN, WEBGPU), first.calls)
+
+        // Next start: QNN is probed again and, once it passes, the choice is persisted.
+        val second = FakeProber(results + (QNN to passed(250)))
+        val next = selector(all, second, store)
+        assertFalse(next.isReady())
+        assertEquals(QNN, next.current())
+        assertTrue(second.calls.contains(QNN))
+        assertEquals(QNN, store.value!!.chosen)
+    }
+
+    @Test
+    fun `out of memory during a probe is not persisted as a rejection`() = runTest {
+        val store = InMemoryStore()
+        val prober = FakeProber(mapOf(CPU to passed(6000)), throwing = setOf(QNN), error = OutOfMemoryError("session"))
+        assertEquals(CPU, selector(listOf(QNN, CPU), prober, store).current())
+        assertFalse(store.value!!.failed.containsKey(QNN))
+        assertNull(store.value!!.chosen)
+    }
+
+    @Test
+    fun `backend output failure during a probe is persisted`() = runTest {
+        val store = InMemoryStore()
+        val prober = FakeProber(
+            mapOf(CPU to passed(6000)),
+            throwing = setOf(WEBGPU),
+            error = com.example.vocalremover.BackendOutputException("silent chunk"),
+        )
+        assertEquals(CPU, selector(listOf(WEBGPU, CPU), prober, store).current())
+        assertTrue(store.value!!.failed.getValue(WEBGPU).contains("silent chunk"))
+        assertEquals(CPU, store.value!!.chosen)
+    }
+
+    @Test
+    fun `failed preparation aborts the probe without persisting and retries on the next start`() = runTest {
+        val store = InMemoryStore()
+        val results = mapOf(QNN to passed(250), WEBGPU to passed(1500), CPU to passed(6000))
+        val first = FakeProber(results).apply { prepareError = java.io.IOException("No space left on device") }
+        val sel = selector(all, first, store)
+
+        assertEquals(CPU, sel.current())
+        assertTrue(first.calls.isEmpty())
+        assertNull(store.value)
+        // The rest of this process stays on CPU without retrying.
+        assertEquals(CPU, sel.current())
+        assertEquals(1, first.prepareCalls)
+
+        val second = FakeProber(results)
+        assertEquals(QNN, selector(all, second, store).current())
+        assertEquals(QNN, store.value!!.chosen)
+    }
+
+    @Test
+    fun `reportFailure after an inconclusive probe does not persist the choice`() = runTest {
+        val store = InMemoryStore()
+        val prober = FakeProber(
+            mapOf(QNN to passed(250), CPU to passed(6000)),
+            throwing = setOf(WEBGPU),
+            error = java.io.IOException("io"),
+        )
+        val sel = selector(all, prober, store)
+        assertEquals(QNN, sel.current())
+        assertEquals(CPU, sel.reportFailure(QNN, OrtException("x")))
+        assertTrue(store.value!!.failed.containsKey(QNN))
+        assertNull(store.value!!.chosen)
+        assertEquals(CPU, sel.current())
+    }
+
+    @Test
+    fun `in progress marker is written synchronously`() = runTest {
+        val store = InMemoryStore()
+        val sel = selector(all, FakeProber(mapOf(QNN to passed(250), WEBGPU to passed(1500))), store)
+        sel.current()
+        assertEquals(listOf<ExecutionBackend?>(QNN, WEBGPU), store.durableWrites)
+        sel.markInProgress(QNN)
+        assertEquals(QNN, store.durableWrites.last())
     }
 }

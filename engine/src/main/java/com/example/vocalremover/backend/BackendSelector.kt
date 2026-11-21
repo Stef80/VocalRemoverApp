@@ -26,5 +26,15 @@ sealed interface ProbeResult {
 }
 
 fun interface BackendProber {
+    /**
+     * Probes one candidate. Backend failures (ORT errors, native link errors) may be thrown or
+     * returned as [ProbeResult.Rejected]; any other exception (I/O, out of memory) is inconclusive.
+     */
     suspend fun probe(backend: ExecutionBackend): ProbeResult
+
+    /**
+     * One-off work shared by every candidate (model copy, reference load). A failure here says
+     * nothing about the backends, so the selector aborts the probe without persisting anything.
+     */
+    suspend fun prepare() {}
 }

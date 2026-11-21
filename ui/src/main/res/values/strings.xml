@@ -123,7 +123,8 @@
     <string name="import_player_time">%1$s / %2$s</string>
     <string name="import_capture_trimmed">Tagliata</string>
     <string name="import_processing_decoding">Lettura del brano…</string>
-    <string name="import_processing_preparing_backend">Preparazione dell\'acceleratore per questo telefono (solo la prima volta)…</string>
+    <string name="import_processing_preparing_backend">Preparazione dell\'acceleratore per questo telefono…</string>
+    <string name="import_processing_retrying_backend">Acceleratore non disponibile, riprovo…</string>
     <string name="import_processing_running">Rimozione voce… %1$d%%</string>
     <string name="import_processing_saving">Salvataggio…</string>
     <string name="import_event_edit_saved">Modifica salvata</string>

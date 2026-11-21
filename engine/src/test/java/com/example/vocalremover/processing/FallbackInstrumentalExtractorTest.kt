@@ -122,6 +122,24 @@ class FallbackInstrumentalExtractorTest {
     }
 
     @Test
+    fun `signals the backend retry instead of resetting the progress`() = runTest {
+        val selector = FakeSelector(QNN, mapOf(QNN to WEBGPU))
+        val extractor = FallbackInstrumentalExtractor(selector) { backend ->
+            FakeRemover(backend, selector.events) { pcm, onProgress ->
+                onProgress(40)
+                if (backend == QNN) throw OrtException("QNN graph failed")
+                onProgress(100)
+                pcm
+            }
+        }
+        val events = mutableListOf<String>()
+
+        extractor.extract(mix, onProgress = { events += "$it" }, onBackendRetry = { events += "retry" })
+
+        assertEquals(listOf("40", "retry", "40", "100"), events)
+    }
+
+    @Test
     fun `marks in progress and completed around a run`() = runTest {
         val selector = FakeSelector(QNN, emptyMap())
         val extractor = FallbackInstrumentalExtractor(selector) { backend ->

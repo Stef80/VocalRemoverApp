@@ -4,10 +4,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.vocalremover.ExecutionBackend
 import com.example.vocalremover.VocalRemover
+import com.example.vocalremover.backend.OrtBackendProber
 import com.example.vocalremover.backend.ProbeReference
 import com.example.vocalremover.backend.ProbeSignal
-import kotlinx.coroutines.runBlocking
 import com.example.vocalremover.backend.OutputQuality
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -36,7 +37,8 @@ class ProbeReferenceGenerator {
         val remover = VocalRemover(context, ExecutionBackend.CPU)
         val out = try {
             remover.warmUp()
-            remover.removeVocals(ProbeSignal.generate())
+            // Same single-chunk path as the probe: one session.run on the probe signal.
+            OrtBackendProber.runProbeChunk(remover).output
         } finally {
             remover.close()
         }

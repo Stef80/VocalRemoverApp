@@ -1,19 +1,21 @@
 package com.example.vocalremover.backend
 
+import ai.onnxruntime.OrtException
 import android.content.Context
-import android.os.SystemClock
 import android.util.Log
+import com.example.vocalremover.BackendOutputException
 import com.example.vocalremover.ExecutionBackend
+import com.example.vocalremover.SingleChunkRun
 import com.example.vocalremover.StereoPcm
 import com.example.vocalremover.VocalRemover
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Runs the model on [ProbeSignal] with the given backend and compares the output with the bundled
- * CPU reference. The first run is a warm-up; only the second is timed.
+ * Runs one model chunk of [ProbeSignal] with the given backend and compares its output with the
+ * bundled CPU reference. The chunk runs twice: the first run is a warm-up (WebGPU compiles its
+ * shaders there); only the `session.run` of the second is timed.
  */
 class OrtBackendProber(
     private val context: Context,
@@ -21,40 +23,55 @@ class OrtBackendProber(
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : BackendProber {
 
+    @Volatile private var reference: StereoPcm? = null
+
+    /** Copies the model and loads the reference; an IOException here is an environment problem. */
+    override suspend fun prepare() = withContext(dispatcher) {
+        VocalRemover.ensureModelFile(context)
+        loadReference()
+        Unit
+    }
+
     override suspend fun probe(backend: ExecutionBackend): ProbeResult = withContext(dispatcher) {
-        val reference = try {
-            context.assets.open(ProbeReference.ASSET).use { ProbeReference.decode(it.readBytes()) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.w(TAG, "Cannot load the probe reference", e)
-            return@withContext ProbeResult.Rejected("reference: ${e.javaClass.simpleName}: ${e.message}")
-        }
+        val expected = loadReference()
         val remover = removerFactory(backend)
         try {
             try {
                 remover.warmUp()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
+            } catch (e: OrtException) {
                 Log.w(TAG, "$backend session failed", e)
                 return@withContext ProbeResult.Rejected("session: ${e.javaClass.simpleName}: ${e.message}")
+            } catch (e: LinkageError) {
+                Log.w(TAG, "$backend native libraries failed", e)
+                return@withContext ProbeResult.Rejected("session: ${e.javaClass.simpleName}: ${e.message}")
             }
-            val signal = ProbeSignal.generate()
-            remover.removeVocals(signal)
-            val start = SystemClock.elapsedRealtime()
-            val out: StereoPcm = remover.removeVocals(signal)
-            val runMs = SystemClock.elapsedRealtime() - start
-
-            OutputQuality.verdict(reference, out)?.let { return@withContext ProbeResult.Rejected(it) }
-            val snr = OutputQuality.stereoSnrDb(reference.left, reference.right, out.left, out.right)
-            ProbeResult.Passed(runMs, snr)
+            val run = try {
+                runProbeChunk(remover)
+                runProbeChunk(remover)
+            } catch (e: BackendOutputException) {
+                return@withContext ProbeResult.Rejected("output: ${e.message}")
+            }
+            val out = run.output
+            OutputQuality.verdict(expected, out)?.let { return@withContext ProbeResult.Rejected(it) }
+            val snr = OutputQuality.stereoSnrDb(expected.left, expected.right, out.left, out.right)
+            ProbeResult.Passed(run.runNanos / 1_000_000, snr)
         } finally {
             remover.close()
         }
     }
 
-    private companion object {
-        const val TAG = "OrtBackendProber"
+    private fun loadReference(): StereoPcm = reference ?: context.assets.open(ProbeReference.ASSET)
+        .use { ProbeReference.decode(it.readBytes()) }
+        .also { reference = it }
+
+    companion object {
+        private const val TAG = "OrtBackendProber"
+
+        /**
+         * The probe's model work: one chunk of [ProbeSignal.generate], one `session.run`. Also used
+         * to generate the CPU reference asset, so the two can never drift apart.
+         */
+        suspend fun runProbeChunk(remover: VocalRemover): SingleChunkRun =
+            remover.runSingleChunk(ProbeSignal.generate())
     }
 }

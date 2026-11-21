@@ -21,6 +21,9 @@ data class BackendChoice(
 interface BackendChoiceStore {
     fun load(): BackendChoice?
     fun save(choice: BackendChoice)
+
+    /** Like [save] but on disk when it returns: used for the crash marker, which a native crash may follow. */
+    fun saveNow(choice: BackendChoice) = save(choice)
 }
 
 class SharedPrefsBackendChoiceStore(context: Context) : BackendChoiceStore {
@@ -39,6 +42,12 @@ class SharedPrefsBackendChoiceStore(context: Context) : BackendChoiceStore {
 
     override fun save(choice: BackendChoice) {
         prefs.edit().putString(KEY_CHOICE, Json.encodeToString(choice)).apply()
+    }
+
+    override fun saveNow(choice: BackendChoice) {
+        if (!prefs.edit().putString(KEY_CHOICE, Json.encodeToString(choice)).commit()) {
+            Log.w(TAG, "Cannot write the backend choice to disk")
+        }
     }
 
     private companion object {

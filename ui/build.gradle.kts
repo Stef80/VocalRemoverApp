@@ -56,12 +56,21 @@ android {
         }
     }
 
+    androidResources {
+        // The app loads vocal_remover_fp32.onnx; vocal_remover.onnx in :engine's assets is only an
+        // input for convert_fp16.py. The leading entries are AGP's default ignore pattern.
+        ignoreAssetsPattern =
+            "!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:!vocal_remover.onnx"
+    }
+
     // Exclude conflicting native libs (e.g. between onnxruntime and other dependencies)
     packaging {
         jniLibs {
             pickFirsts += listOf("**/libc++_shared.so")
             // QNN: libraries must be extracted to disk so that the DSP can load the Skels.
             useLegacyPackaging = true
+            // Unused QNN backends (DSP, GPU): only the HTP backend is used.
+            excludes += listOf("**/libQnnDsp*.so", "**/libQnnGpu*.so")
         }
     }
 }

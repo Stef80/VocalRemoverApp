@@ -57,6 +57,7 @@ class ImportViewModelTest {
     private var extractorCalls = 0
     private var backendReady = true
     private var prepareGate: CompletableDeferred<Unit>? = null
+    private var retryGate: CompletableDeferred<Unit>? = null
     private var savedInstrumentalName: String? = null
     private var pickedFileName: String? = "Canzone.mp3"
     private val pickedFile: Uri = Uri.parse("content://downloads/document/42")
@@ -81,10 +82,21 @@ class ImportViewModelTest {
         val processor = SongProcessor(
             decoder = PcmDecoder { StereoPcm(FloatArray(4), FloatArray(4)) },
             extractor = object : InstrumentalExtractor {
-                override suspend fun extract(mix: StereoPcm, onProgress: (Int) -> Unit): StereoPcm {
+                override suspend fun extract(mix: StereoPcm, onProgress: (Int) -> Unit): StereoPcm =
+                    extract(mix, onProgress) {}
+
+                override suspend fun extract(
+                    mix: StereoPcm,
+                    onProgress: (Int) -> Unit,
+                    onBackendRetry: () -> Unit,
+                ): StereoPcm {
                     extractorCalls++
                     if (extractorFails) throw IOException("ORT")
                     extractorGate?.await()
+                    retryGate?.let {
+                        onBackendRetry()
+                        it.await()
+                    }
                     onProgress(50)
                     return mix
                 }
@@ -312,6 +324,20 @@ class ImportViewModelTest {
 
         assertEquals(ImportUiState.Processing("Registrazione", ProcessingPhase.PreparingBackend), vm.importState.value)
         prepareGate!!.complete(Unit)
+        assertEquals(ImportUiState.Empty, vm.importState.value)
+        assertEquals(savedUri, captures.completed)
+    }
+
+    @Test
+    fun `maps backend retry state to phase`() = runTest(dispatcher) {
+        captures.capture = pending
+        retryGate = CompletableDeferred()
+        val vm = viewModel()
+
+        vm.process()
+
+        assertEquals(ImportUiState.Processing("Registrazione", ProcessingPhase.RetryingBackend), vm.importState.value)
+        retryGate!!.complete(Unit)
         assertEquals(ImportUiState.Empty, vm.importState.value)
         assertEquals(savedUri, captures.completed)
     }

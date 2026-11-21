@@ -21,6 +21,13 @@ fun interface PcmDecoder { fun decode(uri: Uri): StereoPcm }
 fun interface InstrumentalExtractor {
     suspend fun extract(mix: StereoPcm, onProgress: (Int) -> Unit): StereoPcm
 
+    /**
+     * Like [extract], and calls [onBackendRetry] when the song restarts from the beginning on
+     * another backend; the progress reported afterwards belongs to the new run.
+     */
+    suspend fun extract(mix: StereoPcm, onProgress: (Int) -> Unit, onBackendRetry: () -> Unit): StereoPcm =
+        extract(mix, onProgress)
+
     /** False while [prepare] still has slow one-off work to do (e.g. the backend probe). */
     fun isReady(): Boolean = true
 
@@ -85,7 +92,30 @@ class SongProcessor(
             _state.value = ProcessingState.Processing(0)
             val decoded = mix!!
             val instrumental = withContext(computeDispatcher) {
-                extractor.extract(decoded) { percent -> _state.value = ProcessingState.Processing(percent) }
+                // After a backend switch the retry text stays until the new run really advances:
+                // its first report only says it started (VocalRemover reports 2% before the first chunk).
+                var retryStart: Int? = null
+                var retrying = false
+                extractor.extract(
+                    decoded,
+                    onProgress = progress@{ percent ->
+                        if (retrying) {
+                            val start = retryStart
+                            if (start == null && percent < 100) {
+                                retryStart = percent
+                                return@progress
+                            }
+                            if (start != null && percent <= start) return@progress
+                            retrying = false
+                        }
+                        _state.value = ProcessingState.Processing(percent)
+                    },
+                    onBackendRetry = {
+                        retrying = true
+                        retryStart = null
+                        _state.value = ProcessingState.RetryingBackend
+                    },
+                )
             }
             @Suppress("UNUSED_VALUE")
             mix = null

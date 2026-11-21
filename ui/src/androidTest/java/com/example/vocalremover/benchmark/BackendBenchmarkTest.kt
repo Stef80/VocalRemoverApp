@@ -47,8 +47,9 @@ class BackendBenchmarkTest {
         var selection: String? = null
         val backend = if (backendArg == "auto") {
             val selector = ProbingBackendSelector.create(context)
-            val chosen = selector.current()
-            selection = describeSelection(SharedPrefsBackendChoiceStore(context).load(), chosen)
+            var chosen = ExecutionBackend.CPU
+            val probeMs = timed { chosen = selector.current() }
+            selection = describeSelection(SharedPrefsBackendChoiceStore(context).load(), chosen) + "; probeMs=$probeMs"
             chosen
         } else {
             ExecutionBackend.fromId(backendArg)

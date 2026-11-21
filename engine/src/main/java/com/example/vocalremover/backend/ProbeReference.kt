@@ -5,7 +5,8 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * CPU output for [ProbeSignal.generate], stored as little-endian fp16 (all L samples, then all R).
+ * CPU output of the probe chunk (the ISTFT of one `session.run` on [ProbeSignal.generate], see
+ * [OrtBackendProber.runProbeChunk]): [ProbeSignal.FRAMES] frames, stored as little-endian fp16 (all L samples, then all R).
  * fp16 halves the asset size; its precision (~1e-3) is far below the SNR threshold.
  */
 object ProbeReference {

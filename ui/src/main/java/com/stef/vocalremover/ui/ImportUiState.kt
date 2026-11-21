@@ -23,8 +23,10 @@ sealed interface ImportUiState {
 /** Stages shown by the progress bar, from `SongProcessor.state`. */
 sealed interface ProcessingPhase {
     data object Decoding : ProcessingPhase
-    /** Backend probe still running (first launch only): no percentage. */
+    /** Backend probe still running (first launch, or after an app/system update): no percentage. */
     data object PreparingBackend : ProcessingPhase
+    /** The accelerator failed mid-song and the song restarts on the next backend: no percentage. */
+    data object RetryingBackend : ProcessingPhase
     data class Running(val percent: Int) : ProcessingPhase
     data object Saving : ProcessingPhase
 }

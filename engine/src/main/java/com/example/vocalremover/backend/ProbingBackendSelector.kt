@@ -1,8 +1,10 @@
 package com.example.vocalremover.backend
 
+import ai.onnxruntime.OrtException
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import com.example.vocalremover.BackendOutputException
 import com.example.vocalremover.ExecutionBackend
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -13,6 +15,10 @@ import kotlinx.coroutines.sync.withLock
  * check and persists the outcome. CPU (last in the list) is probed only when no accelerator
  * passed: otherwise it stays the untimed last-resort fallback. A marker written around each probe/run lets the next start
  * blacklist a backend that crashed the process.
+ *
+ * Only backend-attributable failures are persisted (ORT errors, native link errors, quality
+ * verdicts). Environment failures (I/O such as a full disk, out of memory) are inconclusive: the
+ * outcome of such a probe is kept in memory for this process only and the next start probes again.
  */
 class ProbingBackendSelector(
     private val candidates: List<ExecutionBackend>,
@@ -29,8 +35,12 @@ class ProbingBackendSelector(
     // Set when CPU left a crash marker: it stays the fallback but is not probed again this round.
     private var skipCpuProbe = false
 
+    // Choice of an inconclusive probe: used for this process only, never persisted.
+    @Volatile private var provisional: ExecutionBackend? = null
+
     override suspend fun current(): ExecutionBackend = mutex.withLock {
         validChosen()?.let { return it }
+        provisional?.let { return it }
         probeAll()
     }
 
@@ -45,15 +55,16 @@ class ProbingBackendSelector(
             Log.w(TAG, "$backend failed at runtime: $reason")
             val next = updated.timingsMs.filterKeys { it !in updated.failed }
                 .minByOrNull { it.value }?.key ?: ExecutionBackend.CPU
-            update { it.copy(chosen = next) }
+            if (provisional != null) provisional = next else update { it.copy(chosen = next) }
             Log.i(TAG, "Switched to $next")
             next
         }
 
-    override fun isReady(): Boolean = validChosen() != null
+    override fun isReady(): Boolean = validChosen() != null || provisional != null
 
     override fun markInProgress(backend: ExecutionBackend) {
-        update { it.copy(inProgress = backend) }
+        // Synchronous write: a native crash right after must still find the marker on disk.
+        update(durable = true) { it.copy(inProgress = backend) }
     }
 
     override fun markCompleted(backend: ExecutionBackend) {
@@ -71,7 +82,17 @@ class ProbingBackendSelector(
     }
 
     private suspend fun probeAll(): ExecutionBackend {
+        try {
+            prober.prepare()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "Probe aborted, nothing persisted (${describe(e)}); using CPU until the next start", e)
+            provisional = ExecutionBackend.CPU
+            return ExecutionBackend.CPU
+        }
         var acceleratorPassed = false
+        var inconclusive = false
         for (candidate in candidates) {
             val s = loaded()
             if (candidate in s.failed) continue
@@ -88,8 +109,13 @@ class ProbingBackendSelector(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                // Native load failures (UnsatisfiedLinkError, LinkageError) are Errors and must reject the candidate too.
-                ProbeResult.Rejected("Probe threw ${describe(e)}")
+                if (isBackendFailure(e)) {
+                    ProbeResult.Rejected("Probe threw ${describe(e)}")
+                } else {
+                    Log.w(TAG, "$candidate probe inconclusive (${describe(e)}); not persisted", e)
+                    inconclusive = true
+                    null
+                }
             } finally {
                 // The process survived the probe (even if cancelled): the marker must not look like a crash.
                 markCompleted(candidate)
@@ -104,23 +130,30 @@ class ProbingBackendSelector(
                     Log.i(TAG, "$candidate rejected: ${result.reason}")
                     update { it.copy(failed = it.failed + (candidate to result.reason)) }
                 }
+                null -> Unit
             }
         }
         val finished = loaded()
         val best = finished.timingsMs.filterKeys { it !in finished.failed }
             .minByOrNull { it.value }?.key ?: ExecutionBackend.CPU
+        if (inconclusive) {
+            Log.i(TAG, "Probe inconclusive: using $best until the next start, which probes again")
+            provisional = best
+            return best
+        }
         update { it.copy(chosen = best) }
         Log.i(TAG, "Chosen backend: $best")
         return best
     }
 
     /** Applies [change] to the in-memory state and persists the result. */
-    private fun update(change: (BackendChoice) -> BackendChoice): BackendChoice = synchronized(stateLock) {
-        val next = change(loaded())
-        state = next
-        store.save(next)
-        next
-    }
+    private fun update(durable: Boolean = false, change: (BackendChoice) -> BackendChoice): BackendChoice =
+        synchronized(stateLock) {
+            val next = change(loaded())
+            state = next
+            if (durable) store.saveNow(next) else store.save(next)
+            next
+        }
 
     /** Loads the stored state on first use, dropping it when the key changed and applying the crash marker. */
     private fun loaded(): BackendChoice = synchronized(stateLock) {
@@ -161,6 +194,10 @@ class ProbingBackendSelector(
         Log.w(TAG, "Blacklisting $backend: $reason")
         return choice.copy(failed = choice.failed + (backend to reason))
     }
+
+    /** Failures that say something about the backend itself, as opposed to the environment. */
+    private fun isBackendFailure(e: Throwable) =
+        e is OrtException || e is LinkageError || e is BackendOutputException
 
     private fun describe(cause: Throwable) = "${cause::class.java.simpleName}: ${cause.message}"
 

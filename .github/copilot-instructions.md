@@ -12,9 +12,10 @@ commits made automatically — that behavior is retired.
 ## Model file setup
 
 ONNX assets are **not tracked in git** (`*.onnx` is ignored). `VocalRemover.MODEL_ASSET`
-currently loads `engine/src/main/assets/vocal_remover_fp32.onnx`. The README setup still
-mentions `vocal_remover.onnx`; verify the filename against `MODEL_ASSET` when changing
-model setup, and keep the README aligned. See `README.md` for the model download source.
+currently loads `engine/src/main/assets/vocal_remover_fp32.onnx`, and the README setup uses the
+same name; verify the filename against `MODEL_ASSET` when changing model setup, and keep the
+README aligned. `vocal_remover.onnx` is only the input of `convert_fp16.py` and is excluded from
+the APK by `ui/build.gradle.kts`. See `README.md` for the model download source.
 Do not force-add model files; keep them local.
 
 ## Build, test, and lint
@@ -27,11 +28,18 @@ This repository is an Android app built with Gradle Kotlin DSL (`build.gradle.kt
   `google-services.json` (gitignored; must contain the client `com.stef.vocalremover`), and the
   on-device `androidTest` benchmark. Depends on `:engine`.
 - `:engine` — Android **library** (namespace `com.example.vocalremover`): decoding, ONNX inference,
-  capture, the model asset, JVM unit tests, and the previous XML/ViewBinding
-  `com.example.vocalremover.MainActivity` (opened from the Compose launcher until it is migrated and
-  removed). There are no product flavors: the execution backend is chosen at runtime
+  capture, processing (`processing/SongProcessor`), library playback, the model asset and JVM unit
+  tests; it has no UI of its own. There are no product flavors: the execution backend is chosen at runtime
   (`backend/BackendCandidates` lists the candidates for the device's SoC, best first) and passed
-  to `VocalRemover(context, backend)`. `:engine` must never depend on `:ui`.
+  to `VocalRemover(context, backend)`. `backend/ProbingBackendSelector` probes them once per
+  install/OS build, timing one `session.run` on a single model chunk and checking its output against
+  the CPU reference asset `backend_probe/expected_fp16.bin` (fastest passing wins; CPU is probed only
+  if no accelerator passes), and persists the choice. Only backend failures (ORT errors, native link
+  errors, bad output) are persisted; I/O and out-of-memory failures are inconclusive and re-probed on
+  the next start; `:ui`'s
+  `VocalRemoverApplication` owns it and `FallbackInstrumentalExtractor` switches to the next backend
+  if one fails during use (log tag `FallbackExtractor`; the UI shows `RetryingBackend` meanwhile).
+  `:engine` must never depend on `:ui`.
 - Both use `compileSdk = 37` (needed by Compose BOM 2026.08+ / lifecycle-compose 2.11); `targetSdk` stays 36.
 
 Use Gradle from the repo root:
@@ -56,7 +64,8 @@ gradle :ui:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArgument
 
 `BackendBenchmarkTest` (`ui/src/androidTest`) is the on-device benchmark: it processes a deterministic
 synthetic stereo signal with the backend given by the `backend` argument (`cpu`/`webgpu`/`qnn`,
-or `auto`, the default: the first candidate for the device), compares it against an in-process CPU-EP
+or `auto`, the default: the backend `ProbingBackendSelector` chooses, i.e. the fastest candidate
+that passes the probe, with the probe outcome in the JSON `selection` field), compares it against an in-process CPU-EP
 reference (`VocalRemover(context, ExecutionBackend.CPU)`), and fails on NaN/Inf, silence, or
 SNR < 20 dB. It reports a JSON line (logcat tag `VRBenchmark` and
 `files/benchmark/report-<backend>.json`), runnable on Firebase Test Lab (see `README.md`). Its pure
@@ -94,17 +103,20 @@ required on Realme RMX3301 (SM8450, HTP v69):
 - `setSymbolicDimensionValue("batch_size", 1)`: the model has a symbolic batch dimension and no
   `value_info`, and without this QNN rejects every node with "Cannot get shape".
 - The HTP graph compile is cached as an EP context (`QnnConfig.contextCacheFile`, keyed by
-  `lastUpdateTime`) in `filesDir`. `VocalRemover` creates its session lazily, off the UI thread
-  (`warmUp()` from `MainActivity`), because the first compile takes tens of seconds.
+  `lastUpdateTime`) in `noBackupFilesDir`: at ~42 MB it would exceed the 25 MB Auto Backup quota and
+  skip the whole app backup, and it is useless after a restore. Caches left in `filesDir` by older
+  builds are deleted. `VocalRemover` creates its session lazily, off the UI thread (`warmUp()`,
+  called by the backend probe started from `MainActivity.onCreate`), because the first compile
+  takes tens of seconds.
 Measured: ONNX run ~245 ms/chunk (CPU ~6 s), outputPeak 0.48093 vs CPU 0.48072, FP16 on HTP.
 
 ## High-level architecture
 
 The app pipeline is:
 
-1. `:ui` `MainActivity` (Compose) is the launcher; for now it only opens the previous `:engine` `MainActivity`, which handles permissions, file selection, UI state, and player controls.
-2. `AudioPlayer` decodes input audio (`MediaExtractor` + `MediaCodec`) into true stereo float PCM at 44.1kHz (`StereoPcm`, no premature downmix), calls vocal-removal processing, and downmixes to mono only right before playback with `AudioTrack`.
-3. For system-audio capture, the engine activity obtains MediaProjection consent and starts `SystemAudioCaptureService`; the service writes captured stereo PCM to a temporary WAV, and the activity consumes the terminal result, reads the WAV, and coordinates processing/saving.
+1. `:ui` `MainActivity` (Compose) is the launcher (Splash → `PlayerScreen` / `ImportSongScreen`); `ImportViewModel` handles file selection and the pending capture, and drives processing.
+2. `SongProcessor` (engine `processing/`) decodes input audio with `AudioDecoder` (`MediaExtractor` + `MediaCodec`) into true stereo float PCM at 44.1kHz (`StereoPcm`, no downmix), runs `FallbackInstrumentalExtractor` (around `VocalRemover`), and saves a stereo WAV to Music/VocalRemover; `LibraryPlayer` (ExoPlayer) plays the saved files. `AudioPlayer` (AudioTrack, mono downmix right before playback) is legacy and has no callers.
+3. For system-audio capture, `:ui`'s `MediaProjectionConsentActivity` obtains MediaProjection consent and the floating bubble (`BubbleOverlayService`) starts `SystemAudioCaptureService`; the service writes captured stereo PCM to a temporary WAV and a terminal result, which `ImportViewModel` consumes as the pending capture (trim, then process/save).
 4. `VocalRemover` runs model inference with **ONNX Runtime** (custom `onnxruntime-android-vr:1.24.3` AAR) using the stereo-aware **UVR-MDX-NET-Inst_HQ_5** ONNX model (`vocal_remover_fp32.onnx`):
    - The model outputs the **instrumental's complex spectrum directly** (no ratio-mask step, unlike the old Open-Unmix pipeline) — ONNX inference output goes straight into ISTFT.
    - `MdxStftProcessor` implements the model's exact **centered/reflect-padded STFT/ISTFT** convention (`n_fft=5120`, `hop_length=1024`, `dim_f=2560` frequency-bin crop) required by MDX-Net. Since `n_fft=5120 = 5·1024` is not a power of 2, it uses `MixedRadixFft` (radix-5 × table-driven radix-2, ~15x faster than Bluestein); other lengths (e.g. `n_fft=6` in tests) fall back to `BluesteinFft`. The pipeline calls `forwardStereoInto`/`inverseStereoInto`, which pack L and R into one complex FFT per frame (`z = L + i·R`) and must stay numerically identical to two per-channel `forwardInto`/`inverseInto` calls (see `MdxStftStereoTest`).
@@ -118,16 +130,15 @@ Related offline tooling (deprecated, kept for reference only):
 
 ## Key repository conventions
 
-- For user-visible static text in the active `:ui` Compose app (labels, messages, and warnings), use Android string resources in `ui/src/main/res/values/strings.xml` and read them with `stringResource`; do not hard-code UI copy or use `.properties`. Do not modify the legacy UI in `:engine` for this rule; it is slated for removal.
+- For user-visible static text in the active `:ui` Compose app (labels, messages, and warnings), use Android string resources in `ui/src/main/res/values/strings.xml` and read them with `stringResource`; do not hard-code UI copy or use `.properties`. `:engine` has no screens of its own.
 - Every `:ui` Compose screen shows the app logo (`R.drawable.logo_corallo_blu`) next to its title.
 - Keep audio constants aligned across components:
   - `MdxStftProcessor`/`MdxChunker` (`nFft=5120`, `hopLength=1024`, `dimF=2560`, `dimT=256`, `overlap=0.25`) — these match the UVR-MDX-NET-Inst_HQ_5 ONNX model's expected I/O contract exactly (`[batch,4,2560,256]` tensor, channel order `[L_re,L_im,R_re,R_im]`).
-  - `AudioPlayer` decode/processing is **true stereo** float PCM at 44.1kHz (`StereoPcm`); downmix to mono happens only immediately before `AudioTrack` playback.
+  - `AudioDecoder` decode/processing is **true stereo** float PCM at 44.1kHz (`StereoPcm`); never downmix before inference.
   - `VocalRemover.DIM_T = 256` requires **exactly** 256 STFT frames per inference call — this is a hard constraint baked into the model graph, not a tunable value. `MdxChunker`'s outer chunking exists specifically to feed the model fixed-size chunks regardless of song length.
 - Never feed the model duplicated mono-as-stereo data — it is a genuinely stereo-aware model and requires real left/right channel differences for correct separation quality.
 - Preserve progress-phase semantics exposed to UI:
-  - processing progress is emitted from `VocalRemover.removeVocals` and mapped in `MainActivity` to user-facing phase labels.
-- `AudioPlayer` is the orchestration boundary for decode/process/playback:
-  - callbacks (`onProgress`, `onReady`, `onError`, `onPlaybackPositionChanged`) are the integration contract with `MainActivity`.
-- In `:ui`, never hard-code user-visible text (labels, statuses, Toasts, error messages, notifications): put it in `ui/src/main/res/values/strings.xml` and read it with `stringResource` (composables) or `getString` (Activities/Services). Only the legacy `:engine` UI still uses direct string literals (mostly Italian); leave it as is.
+  - processing progress is emitted from `VocalRemover.removeVocals`, exposed as `SongProcessor.state` (`ProcessingState`) and mapped by `ImportViewModel` to `ProcessingPhase` and user-facing labels in strings.xml.
+- `SongProcessor` is the orchestration boundary for decode/process/save; its `ProcessingState` flow is the integration contract with `:ui`.
+- In `:ui`, never hard-code user-visible text (labels, statuses, Toasts, error messages, notifications): put it in `ui/src/main/res/values/strings.xml` and read it with `stringResource` (composables) or `getString` (Activities/Services). In `:engine`, only the `SystemAudioCaptureService` notification still uses direct string literals (Italian); leave it as is. Everything else exposes states and error codes that `:ui` maps to strings.
 - ONNX Runtime (`onnxruntime-android-vr`) must stay at **1.24.3+** to satisfy the Android 16KB page size requirement (both `libonnxruntime.so` and `libonnxruntime4j_jni.so` must be 16KB-aligned; versions before 1.23.0 have a misaligned JNI lib). Verify alignment via `unzip -p app-debug.apk lib/arm64-v8a/lib*.so > /tmp/lib.so && readelf -lW /tmp/lib.so | awk '/LOAD/{print $NF}' | sort -u` (look for `0x4000`).

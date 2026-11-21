@@ -33,7 +33,14 @@ class FallbackInstrumentalExtractor(
         selector.current()
     }
 
-    override suspend fun extract(mix: StereoPcm, onProgress: (Int) -> Unit): StereoPcm {
+    override suspend fun extract(mix: StereoPcm, onProgress: (Int) -> Unit): StereoPcm =
+        extract(mix, onProgress) { onProgress(0) }
+
+    override suspend fun extract(
+        mix: StereoPcm,
+        onProgress: (Int) -> Unit,
+        onBackendRetry: () -> Unit,
+    ): StereoPcm {
         while (true) {
             val backend = selector.current()
             val current = removerFor(backend)
@@ -46,7 +53,7 @@ class FallbackInstrumentalExtractor(
                 release(current)
                 val next = selector.reportFailure(backend, e)
                 Log.i(TAG, "Retrying on $next")
-                onProgress(0)
+                onBackendRetry()
             } finally {
                 // The process survived the run: whatever happened, it was not a native crash.
                 selector.markCompleted(backend)

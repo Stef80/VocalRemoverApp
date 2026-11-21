@@ -39,4 +39,14 @@ class ProbeReferenceFormatTest {
         // 1.0 = 0x3C00, -2.0 = 0xC000
         assertEquals(listOf<Byte>(0x00, 0x3C, 0x00, 0xC0.toByte()), bytes.toList())
     }
+
+    @Test
+    fun `bundled asset holds exactly one probe chunk`() {
+        // Unit tests run from the module directory.
+        val asset = java.io.File("src/main/assets/${ProbeReference.ASSET}")
+        assertTrue("Missing ${asset.absolutePath}", asset.isFile)
+        assertEquals(com.example.vocalremover.VocalRemover.CHUNK_FRAMES, ProbeSignal.FRAMES)
+        assertEquals(ProbeSignal.FRAMES * 4L, asset.length())
+        assertEquals(ProbeSignal.FRAMES, ProbeReference.decode(asset.readBytes()).size)
+    }
 }

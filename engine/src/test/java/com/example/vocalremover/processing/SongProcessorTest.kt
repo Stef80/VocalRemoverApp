@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -118,6 +119,71 @@ class SongProcessorTest {
         states.clear()
         processor.process(source, "brano")
         assertFalse(ProcessingState.PreparingBackend in states)
+    }
+
+    @Test
+    fun `backend retry shows retrying until the new run advances`() = runTest {
+        val extractor = object : InstrumentalExtractor {
+            override suspend fun extract(mix: StereoPcm, onProgress: (Int) -> Unit) = error("3-arg expected")
+            override suspend fun extract(
+                mix: StereoPcm,
+                onProgress: (Int) -> Unit,
+                onBackendRetry: () -> Unit,
+            ): StereoPcm {
+                // yield() after each report lets the state collector see every value (StateFlow conflates).
+                onProgress(2); yield()
+                onProgress(40); yield()
+                onBackendRetry(); yield()
+                onProgress(2); yield() // the new run only started
+                onProgress(2); yield()
+                onProgress(30); yield()
+                onProgress(100); yield()
+                return mix
+            }
+        }
+        val processor = processor(extractor = extractor)
+        val states = recordStates(processor)
+
+        processor.process(source, "brano")
+
+        assertEquals(
+            listOf(
+                ProcessingState.Idle,
+                ProcessingState.Decoding,
+                ProcessingState.Processing(0),
+                ProcessingState.Processing(2),
+                ProcessingState.Processing(40),
+                ProcessingState.RetryingBackend,
+                ProcessingState.Processing(30),
+                ProcessingState.Processing(100),
+                ProcessingState.Saving,
+                ProcessingState.Done(saved),
+            ),
+            states
+        )
+    }
+
+    @Test
+    fun `backend retry ends when the new run completes at once`() = runTest {
+        val extractor = object : InstrumentalExtractor {
+            override suspend fun extract(mix: StereoPcm, onProgress: (Int) -> Unit) = mix
+            override suspend fun extract(
+                mix: StereoPcm,
+                onProgress: (Int) -> Unit,
+                onBackendRetry: () -> Unit,
+            ): StereoPcm {
+                onBackendRetry(); yield()
+                onProgress(100); yield()
+                return mix
+            }
+        }
+        val processor = processor(extractor = extractor)
+        val states = recordStates(processor)
+
+        processor.process(source, "brano")
+
+        val retry = states.indexOf(ProcessingState.RetryingBackend)
+        assertEquals(ProcessingState.Processing(100), states[retry + 1])
     }
 
     @Test

@@ -32,6 +32,9 @@ data class StereoPcm(
         get() = left.size
 }
 
+/** Output of [VocalRemover.runSingleChunk]: the chunk's ISTFT and the `session.run` duration. */
+class SingleChunkRun(val output: StereoPcm, val runNanos: Long)
+
 class VocalRemover(
     context: Context,
     private val backend: ExecutionBackend
@@ -75,6 +78,32 @@ class VocalRemover(
             } finally {
                 tmpFile.delete()
             }
+        }
+
+        /** Frames of one model chunk: hop * (DIM_T - 1). */
+        const val CHUNK_FRAMES = HOP_LENGTH * (DIM_T - 1)
+
+        private fun installKey(context: Context): Long =
+            context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+
+        /**
+         * Copies the model asset to cacheDir (once per install key) and returns the copy. Copies
+         * (and .tmp files) from previous installs are deleted. Throws IOException when the copy
+         * fails, e.g. on a full disk.
+         */
+        internal fun ensureModelFile(context: Context): File {
+            // Install key in the name: an app update that changes the model does not reuse the old copy.
+            val cacheDir = context.cacheDir
+            val modelFile = File(cacheDir, "${MODEL_CACHE_PREFIX}_${installKey(context)}.onnx")
+            cacheDir.listFiles { f -> f.name.startsWith(MODEL_CACHE_PREFIX) && f != modelFile }
+                ?.forEach { it.delete() }
+            if (!modelFile.exists()) {
+                Log.i(TAG, "Copying the ONNX model to cache: ${modelFile.absolutePath}")
+                context.assets.open(MODEL_ASSET).use { input ->
+                    copyAssetStreamToFile(input, modelFile)
+                }
+            }
+            return modelFile
         }
 
         /** Absolute peak over two channels in a single pass, without per-sample function calls. */
@@ -183,6 +212,9 @@ class VocalRemover(
         val chunkOutL = FloatArray(chunkSize)
         val chunkOutR = FloatArray(chunkSize)
 
+        /** Duration of the last session.run, in nanoseconds. */
+        var lastRunNanos = 0L
+
         override fun close() {
             inputTensor.close()
             outputTensor.close()
@@ -197,22 +229,8 @@ class VocalRemover(
         loaded
     }
 
-    private fun installKey(context: Context): Long =
-        context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
-
     private fun createSession(context: Context): OrtSession {
-        // Install key in the name: an app update that changes the model
-        // does not reuse the old copy. Copies (and .tmp files) from previous installs are deleted.
-        val cacheDir = context.cacheDir
-        val modelFile = File(cacheDir, "${MODEL_CACHE_PREFIX}_${installKey(context)}.onnx")
-        cacheDir.listFiles { f -> f.name.startsWith(MODEL_CACHE_PREFIX) && f != modelFile }
-            ?.forEach { it.delete() }
-        if (!modelFile.exists()) {
-            Log.i(TAG, "Copying the ONNX model to cache: ${modelFile.absolutePath}")
-            context.assets.open(MODEL_ASSET).use { input ->
-                copyAssetStreamToFile(input, modelFile)
-            }
-        }
+        val modelFile = ensureModelFile(context)
         Log.i(
             TAG,
             "Execution backend=${backend.id}, modelCache=${modelFile.absolutePath}, modelBytes=${modelFile.length()}"
@@ -253,11 +271,8 @@ class VocalRemover(
 
     /** Loads the compiled HTP graph if present, otherwise compiles and saves it. */
     private fun createQnnSession(context: Context, modelFile: File, options: OrtSession.SessionOptions): OrtSession {
-        val dir = context.filesDir
-       // @Suppress("DEPRECATION")
-        val ctxFile = QnnConfig.contextCacheFile(dir, installKey(context))
-        QnnConfig.staleContextCaches(dir.list()?.toList().orEmpty(), ctxFile.name)
-            .forEach { File(dir, it).delete() }
+        val ctxFile = QnnConfig.contextCacheFile(context, installKey(context))
+        QnnConfig.deleteStaleContextCaches(context, ctxFile)
         if (ctxFile.exists()) {
             try {
                 Log.i(TAG, "QNN: loading the compiled context ${ctxFile.name}")
@@ -317,7 +332,7 @@ class VocalRemover(
 
         // 2. Chunking + inference
         val ctx = coroutineContext
-        val chunkSize = HOP_LENGTH * (DIM_T - 1)
+        val chunkSize = CHUNK_FRAMES
         val workspace = ModelWorkspace(env, mdxStft.freqBins, chunkSize)
         var chunksDone = 0
         val estimatedChunks = chunker.chunkCount(signal.size)
@@ -364,6 +379,29 @@ class VocalRemover(
         return StereoPcm(instrumentalLeft, instrumentalRight)
     }
 
+    /**
+     * Backend probe path: runs exactly one model chunk ([CHUNK_FRAMES] frames, one `session.run`)
+     * with the same peak handling, STFT, first-bins zeroing, ISTFT and [ChunkOutputCheck] as
+     * [removeVocals], and returns the chunk's ISTFT together with the `session.run` duration.
+     * Throws [BackendOutputException] when the per-chunk check fails.
+     */
+    internal suspend fun runSingleChunk(chunk: StereoPcm): SingleChunkRun = inferenceMutex.withLock {
+        require(chunk.size == CHUNK_FRAMES) { "A probe chunk has $CHUNK_FRAMES frames, got ${chunk.size}" }
+        coroutineContext.ensureActive()
+        val peak = peakOf(chunk.left, chunk.right)
+        val normalized = peak > NORMALIZATION_PEAK
+        val scale = if (normalized) NORMALIZATION_PEAK / peak else 1f
+        val inL = if (normalized) FloatArray(chunk.size) { chunk.left[it] * scale } else chunk.left
+        val inR = if (normalized) FloatArray(chunk.size) { chunk.right[it] * scale } else chunk.right
+        ModelWorkspace(env, mdxStft.freqBins, CHUNK_FRAMES).use { workspace ->
+            val (outL, outR) = runModelOnChunk(inL, inR, workspace, logSanity = true)
+            val restore = if (normalized) peak else 1f
+            val left = FloatArray(CHUNK_FRAMES) { outL[it] * restore }
+            val right = FloatArray(CHUNK_FRAMES) { outR[it] * restore }
+            SingleChunkRun(StereoPcm(left, right), workspace.lastRunNanos)
+        }
+    }
+
     /** Runs STFT -> ONNX -> ISTFT on a single stereo chunk. */
     private fun runModelOnChunk(
         chunkL: FloatArray,
@@ -398,6 +436,7 @@ class VocalRemover(
             model.session.run(inputMap, outputMap).use { }
         }
         val tRun = System.nanoTime()
+        workspace.lastRunNanos = tRun - t2
 
         workspace.outputBuffer.rewind()
         workspace.outputBuffer.get(workspace.outputData)

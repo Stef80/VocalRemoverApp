@@ -1,5 +1,6 @@
 package com.example.vocalremover
 
+import android.content.Context
 import java.io.File
 
 /** Configuration of the QNN provider (Hexagon HTP NPU on Snapdragon SoCs). */
@@ -41,6 +42,27 @@ object QnnConfig {
         "ep.context_embed_mode" to "1",
         "ep.context_file_path" to file.absolutePath
     )
+
+    /**
+     * The context cache of this install, in noBackupFilesDir: at ~40 MB it would exceed the Auto
+     * Backup quota (and skip the whole app backup), and it is useless after a restore anyway.
+     */
+    fun contextCacheFile(context: Context, installKey: Long): File =
+        contextCacheFile(context.noBackupFilesDir, installKey)
+
+    /**
+     * Deletes the caches of previous installs next to [current], and every cache left in filesDir
+     * by builds that stored it there.
+     */
+    fun deleteStaleContextCaches(context: Context, current: File) {
+        val dir = current.parentFile ?: return
+        staleContextCaches(dir.list()?.toList().orEmpty(), current.name).forEach { File(dir, it).delete() }
+        val legacyDir = context.filesDir
+        if (legacyDir != dir) {
+            staleContextCaches(legacyDir.list()?.toList().orEmpty(), currentName = "")
+                .forEach { File(legacyDir, it).delete() }
+        }
+    }
 
     fun staleContextCaches(fileNames: List<String>, currentName: String): List<String> =
         fileNames.filter {

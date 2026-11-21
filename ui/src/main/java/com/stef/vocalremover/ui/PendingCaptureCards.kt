@@ -172,6 +172,7 @@ internal fun ProcessingProgressCard(phase: ProcessingPhase) {
                 text = when (phase) {
                     ProcessingPhase.Decoding -> stringResource(R.string.import_processing_decoding)
                     ProcessingPhase.PreparingBackend -> stringResource(R.string.import_processing_preparing_backend)
+                    ProcessingPhase.RetryingBackend -> stringResource(R.string.import_processing_retrying_backend)
                     is ProcessingPhase.Running -> stringResource(R.string.import_processing_running, phase.percent)
                     ProcessingPhase.Saving -> stringResource(R.string.import_processing_saving)
                 },

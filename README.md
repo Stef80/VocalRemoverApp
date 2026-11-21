@@ -4,11 +4,16 @@ App Android per la separazione voce/strumentale on-device tramite ONNX Runtime e
 
 ## Setup del modello ONNX (obbligatorio)
 
-Il modello `vocal_remover.onnx` (~59MB, UVR-MDX-NET-Inst_HQ_5) **non è incluso nel repository** perché supera il limite di 100MB imposto da GitHub (o comunque per non appesantire il repo). Va scaricato manualmente prima di poter compilare/eseguire l'app.
+Il modello `vocal_remover_fp32.onnx` (~59MB, UVR-MDX-NET-Inst_HQ_5) **non è incluso nel repository** perché supera il limite di 100MB imposto da GitHub (o comunque per non appesantire il repo). Va scaricato manualmente prima di poter compilare/eseguire l'app.
 
 1. Scarica `UVR-MDX-NET-Inst_HQ_5.onnx` da [Ultimate Vocal Remover models](https://github.com/TRvlvr/model_repo/releases) (o dal repository/hub da cui è stato ottenuto).
-2. Rinominalo in `vocal_remover.onnx`.
-3. Copialo in `engine/src/main/assets/vocal_remover.onnx`.
+2. Rinominalo in `vocal_remover_fp32.onnx`.
+3. Copialo in `engine/src/main/assets/vocal_remover_fp32.onnx` (è il nome che carica
+   `VocalRemover.MODEL_ASSET`).
+
+Un eventuale `engine/src/main/assets/vocal_remover.onnx` serve solo come ingresso di
+`convert_fp16.py` ed è escluso dall'APK (`ui/build.gradle.kts`): con quel nome l'app non trova il
+modello.
 
 Il file è elencato in `.gitignore` (pattern `*.onnx`): resterà sul tuo disco ma non verrà mai committato per errore. Ogni sviluppatore/macchina di build deve ripetere questo passaggio dopo il clone.
 
@@ -25,9 +30,14 @@ gradle :engine:testDebugUnitTest :ui:testDebugUnitTest
 
 Moduli: `:ui` è il modulo application (APK unico `ui/build/outputs/apk/debug/ui-debug.apk`,
 launcher Compose `MainActivity`, application ID `com.stef.vocalremover`, solo `arm64-v8a`);
-`:engine` è la library con decodifica, inferenza ONNX, cattura e la schermata XML precedente.
-Non ci sono più flavor: c'è una sola app e il backend (CPU, WebGPU o QNN) si sceglie a runtime
-in base al SoC del dispositivo.
+`:engine` è la library con decodifica, inferenza ONNX, cattura, elaborazione (`SongProcessor`) e
+riproduzione della libreria; non ha schermate proprie.
+Non ci sono più flavor: c'è una sola app e il backend (CPU, WebGPU o QNN) si sceglie a runtime.
+I candidati dipendono dal SoC (Snapdragon: QNN → WebGPU → CPU; altri: WebGPU → CPU). Al primo
+avvio, e dopo ogni aggiornamento dell'app o del sistema, `ProbingBackendSelector` li prova su un
+chunk del modello e tiene il più veloce tra quelli che danno audio corretto (SNR ≥ 20 dB rispetto al
+riferimento CPU in `engine/src/main/assets/backend_probe/`). Un errore dovuto all'ambiente
+(spazio di archiviazione esaurito, RAM insufficiente) non scarta il backend: la prova si ripete all'avvio successivo.
 
 ## ONNX Runtime (AAR personalizzato)
 
@@ -53,14 +63,16 @@ Il backend `qnn` usa l'NPU Hexagon ed è disponibile solo su SoC Qualcomm (testa
 RMX3301, Snapdragon 8 Gen 1): circa 0,25 s per chunk contro circa
 6 s della CPU, 8 s di inferenza per un brano di 3,5 minuti, outputPeak uguale alla CPU (0,4809 contro 0,4807).
 Al primo avvio dopo l'installazione l'app compila il grafo HTP in background (~30 s) e lo salva in
-`files/qnn_ctx_<installTime>.onnx` (~42 MB). Dagli avvii successivi la sessione si apre in ~0,3 s.
+`no_backup/qnn_ctx_<installTime>.onnx` (~42 MB, `noBackupFilesDir`: escluso dal backup automatico,
+che ha un limite di 25 MB). Dagli avvii successivi la sessione si apre in ~0,3 s.
 Sui dispositivi non Qualcomm si usano WebGPU o CPU.
 
 ## Benchmark su dispositivo (`BackendBenchmarkTest`)
 
 Test di strumentazione che elabora un brano sintetico deterministico (20 s, nessun file audio nel
 repo) con il backend scelto (argomento `backend`: `cpu`, `webgpu`, `qnn` oppure `auto`, il
-default, che usa il primo candidato per il dispositivo) e lo confronta con la CPU nello stesso processo. Misura
+default, che usa il backend scelto da `ProbingBackendSelector`, cioè il più veloce tra i candidati
+che passano la prova; l'esito della prova è nel campo `selection` del JSON) e lo confronta con la CPU nello stesso processo. Misura
 caricamento sessione, tempo di elaborazione e SNR rispetto alla CPU, e fallisce se l'uscita ha
 NaN/Inf, è silenziosa o ha SNR < 20 dB. In questo modo coglie anche i backend che producono audio
 rovinato senza andare in crash (WebGPU su Realme RMX3301: 2 dB).

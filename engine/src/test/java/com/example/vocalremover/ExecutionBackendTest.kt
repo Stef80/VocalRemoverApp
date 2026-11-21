@@ -36,7 +36,7 @@ class ExecutionBackendTest {
 
     @Test
     fun `qnn context cache file is keyed by app install time`() {
-        val dir = java.io.File("/data/cache")
+        val dir = java.io.File("/data/user/0/com.stef.vocalremover/no_backup")
         assertEquals(java.io.File(dir, "qnn_ctx_42.onnx"), QnnConfig.contextCacheFile(dir, 42L))
     }
 
