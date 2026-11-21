@@ -10,12 +10,13 @@ import com.example.vocalremover.ExecutionBackend
 import com.example.vocalremover.StereoPcm
 import com.example.vocalremover.VocalRemover
 import com.example.vocalremover.backend.BackendCandidates
+import com.example.vocalremover.backend.OutputQuality
+import com.example.vocalremover.backend.ProbeSignal
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
-import java.util.Locale
 
 /**
  * Measures timings and correctness of one execution backend on the current device.
@@ -47,14 +48,14 @@ class BackendBenchmarkTest {
             ExecutionBackend.fromId(backendArg)
         }
 
-        val (left, right) = SyntheticStereoSignal.generate(durationSec, SAMPLE_RATE, seed = 42)
-        val input = StereoPcm(left, right)
+        val input = ProbeSignal.generate(durationSec, ProbeSignal.SAMPLE_RATE, seed = 42)
 
         var sessionLoadMs = -1L
         var processMs = -1L
         var referenceMs: Long? = null
         var snr = Double.NaN
         var outRms = 0.0
+        var reference: StereoPcm? = null
         val failure: String? = try {
             val out = VocalRemover(context, backend).useRemover { remover ->
                 sessionLoadMs = timed { remover.warmUp() }
@@ -62,7 +63,7 @@ class BackendBenchmarkTest {
                 processMs = timed { result = remover.removeVocals(input) }
                 result
             }
-            outRms = (BenchmarkMetrics.rms(out.left) + BenchmarkMetrics.rms(out.right)) / 2
+            outRms = (OutputQuality.rms(out.left) + OutputQuality.rms(out.right)) / 2
             snr = if (backend == ExecutionBackend.CPU) {
                 Double.POSITIVE_INFINITY
             } else {
@@ -72,15 +73,10 @@ class BackendBenchmarkTest {
                     referenceMs = timed { result = cpu.removeVocals(input) }
                     result
                 }
-                BenchmarkMetrics.stereoSnrDb(ref.left, ref.right, out.left, out.right)
+                reference = ref
+                OutputQuality.stereoSnrDb(ref.left, ref.right, out.left, out.right)
             }
-            when {
-                !BenchmarkMetrics.allFinite(out.left) || !BenchmarkMetrics.allFinite(out.right) ->
-                    "output with NaN/Inf"
-                outRms < MIN_OUTPUT_RMS -> "uscita silenziosa (rms=$outRms)"
-                snr < minSnrDb -> "SNR rispetto alla CPU troppo basso: ${String.format(Locale.ROOT, "%.1f", snr)} dB < $minSnrDb dB"
-                else -> null
-            }
+            OutputQuality.verdict(ref = reference ?: out, out = out, minSnrDb = minSnrDb)
         } catch (e: Exception) {
             Log.e(TAG, "Benchmark failed", e)
             "${e.javaClass.simpleName}: ${e.message}"
@@ -126,7 +122,5 @@ class BackendBenchmarkTest {
 
     private companion object {
         const val TAG = "VRBenchmark"
-        const val SAMPLE_RATE = 44100
-        const val MIN_OUTPUT_RMS = 1e-3
     }
 }

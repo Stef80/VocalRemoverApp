@@ -1,5 +1,6 @@
-package com.example.vocalremover.benchmark
+package com.example.vocalremover.backend
 
+import com.example.vocalremover.StereoPcm
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.exp
@@ -11,12 +12,24 @@ import kotlin.random.Random
  * chords and bass panned differently on L/R, noise percussion and a harmonic
  * "voice" with vibrato in the center, as in a real mix.
  */
-object SyntheticStereoSignal {
+object ProbeSignal {
 
+    const val SAMPLE_RATE = 44100
+
+    /** One model chunk: hop * (DIM_T - 1) = 1024 * 255 frames. */
+    const val FRAMES = 261_120
+
+    private const val SEED = 42
     private const val TARGET_PEAK = 0.8f
 
-    fun generate(seconds: Double, sampleRate: Int, seed: Int): Pair<FloatArray, FloatArray> {
-        val n = (seconds * sampleRate).toInt()
+    /** The fixed probe: exactly one model chunk of the seed-42 synthetic song. */
+    fun generate(): StereoPcm = generateFrames(FRAMES, SAMPLE_RATE, SEED)
+
+    /** Arbitrary-length variant, used by the benchmark. */
+    fun generate(seconds: Double, sampleRate: Int, seed: Int): StereoPcm =
+        generateFrames((seconds * sampleRate).toInt(), sampleRate, seed)
+
+    private fun generateFrames(n: Int, sampleRate: Int, seed: Int): StereoPcm {
         val rnd = Random(seed)
         val left = FloatArray(n)
         val right = FloatArray(n)
@@ -74,6 +87,6 @@ object SyntheticStereoSignal {
                 right[i] *= scale
             }
         }
-        return left to right
+        return StereoPcm(left, right)
     }
 }

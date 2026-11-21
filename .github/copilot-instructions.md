@@ -60,9 +60,9 @@ or `auto`, the default: the first candidate for the device), compares it against
 reference (`VocalRemover(context, ExecutionBackend.CPU)`), and fails on NaN/Inf, silence, or
 SNR < 20 dB. It reports a JSON line (logcat tag `VRBenchmark` and
 `files/benchmark/report-<backend>.json`), runnable on Firebase Test Lab (see `README.md`). Its pure
-helpers (`BenchmarkMetrics`, `SyntheticStereoSignal`, `BenchmarkReport`) live in
-`engine/src/benchmarkShared/java`, a source dir shared by `:engine` `test` and `:ui` `androidTest` only, so they never
-ship in the app APK.
+report model (`BenchmarkReport`) lives in `engine/src/benchmarkShared/java`, a source dir shared by `:engine`
+`test` and `:ui` `androidTest` only, so it never ships in the app APK. The quality checks (`OutputQuality`) and
+the probe signal (`ProbeSignal`) are in `:engine` main (`com.example.vocalremover.backend`), reused by the app.
 
 The CPU backend uses ORT's default CPU EP: XNNPACK was measured slower on Realme RMX3301 and crashed
 natively inside `session.run` on OPPO CPH2791. Also measured without useful gains (2026-10, do not
