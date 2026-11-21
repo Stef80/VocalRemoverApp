@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import com.example.vocalremover.StereoPcm
-import com.example.vocalremover.VocalRemover
 import com.example.vocalremover.capture.RecordingSaver
 import com.example.vocalremover.decode.AudioDecoder
 import kotlinx.coroutines.CancellationException
@@ -21,6 +20,12 @@ fun interface PcmDecoder { fun decode(uri: Uri): StereoPcm }
 
 fun interface InstrumentalExtractor {
     suspend fun extract(mix: StereoPcm, onProgress: (Int) -> Unit): StereoPcm
+
+    /** False while [prepare] still has slow one-off work to do (e.g. the backend probe). */
+    fun isReady(): Boolean = true
+
+    /** Does the one-off work [isReady] reports as pending; may take tens of seconds. */
+    suspend fun prepare() {}
 }
 
 fun interface InstrumentalSaver { fun save(pcm: StereoPcm, displayName: String): Uri }
@@ -40,12 +45,12 @@ class SongProcessor(
     companion object {
         private const val TAG = "SongProcessor"
 
-        /** Wires the real AudioDecoder, VocalRemover and RecordingSaver. */
-        fun create(context: Context, remover: VocalRemover): SongProcessor {
+        /** Wires the real AudioDecoder and RecordingSaver around [extractor]. */
+        fun create(context: Context, extractor: InstrumentalExtractor): SongProcessor {
             val appContext = context.applicationContext
             return SongProcessor(
                 decoder = PcmDecoder(AudioDecoder(appContext)::decode),
-                extractor = InstrumentalExtractor(remover::removeVocals),
+                extractor = extractor,
                 saver = InstrumentalSaver { pcm, name ->
                     RecordingSaver.saveProcessedStereoAsWav(appContext, pcm, name)
                 },
@@ -73,6 +78,10 @@ class SongProcessor(
             var mix: StereoPcm? = withContext(ioDispatcher) { decoder.decode(source) }
 
             phase = ProcessingError.INFERENCE_FAILED
+            if (!extractor.isReady()) {
+                _state.value = ProcessingState.PreparingBackend
+                withContext(computeDispatcher) { extractor.prepare() }
+            }
             _state.value = ProcessingState.Processing(0)
             val decoded = mix!!
             val instrumental = withContext(computeDispatcher) {

@@ -23,6 +23,8 @@ sealed interface ImportUiState {
 /** Stages shown by the progress bar, from `SongProcessor.state`. */
 sealed interface ProcessingPhase {
     data object Decoding : ProcessingPhase
+    /** Backend probe still running (first launch only): no percentage. */
+    data object PreparingBackend : ProcessingPhase
     data class Running(val percent: Int) : ProcessingPhase
     data object Saving : ProcessingPhase
 }

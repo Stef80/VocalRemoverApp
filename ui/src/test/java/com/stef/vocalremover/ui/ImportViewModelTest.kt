@@ -55,6 +55,8 @@ class ImportViewModelTest {
     private var extractorFails = false
     private var extractorGate: CompletableDeferred<Unit>? = null
     private var extractorCalls = 0
+    private var backendReady = true
+    private var prepareGate: CompletableDeferred<Unit>? = null
     private var savedInstrumentalName: String? = null
     private var pickedFileName: String? = "Canzone.mp3"
     private val pickedFile: Uri = Uri.parse("content://downloads/document/42")
@@ -78,12 +80,21 @@ class ImportViewModelTest {
     private fun viewModel(io: kotlinx.coroutines.CoroutineDispatcher = dispatcher): ImportViewModel {
         val processor = SongProcessor(
             decoder = PcmDecoder { StereoPcm(FloatArray(4), FloatArray(4)) },
-            extractor = InstrumentalExtractor { pcm, onProgress ->
-                extractorCalls++
-                if (extractorFails) throw IOException("ORT")
-                extractorGate?.await()
-                onProgress(50)
-                pcm
+            extractor = object : InstrumentalExtractor {
+                override suspend fun extract(mix: StereoPcm, onProgress: (Int) -> Unit): StereoPcm {
+                    extractorCalls++
+                    if (extractorFails) throw IOException("ORT")
+                    extractorGate?.await()
+                    onProgress(50)
+                    return mix
+                }
+
+                override fun isReady() = backendReady
+
+                override suspend fun prepare() {
+                    prepareGate?.await()
+                    backendReady = true
+                }
             },
             saver = InstrumentalSaver { _, name -> savedInstrumentalName = name; savedUri },
             ioDispatcher = dispatcher,
@@ -288,6 +299,21 @@ class ImportViewModelTest {
         assertEquals(ImportUiState.Empty, vm.importState.value)
         assertEquals(savedUri, captures.completed)
         assertEquals(listOf(ImportEvent.ProcessingDone), events)
+    }
+
+    @Test
+    fun `maps preparing backend state to phase`() = runTest(dispatcher) {
+        captures.capture = pending
+        backendReady = false
+        prepareGate = CompletableDeferred()
+        val vm = viewModel()
+
+        vm.process()
+
+        assertEquals(ImportUiState.Processing("Registrazione", ProcessingPhase.PreparingBackend), vm.importState.value)
+        prepareGate!!.complete(Unit)
+        assertEquals(ImportUiState.Empty, vm.importState.value)
+        assertEquals(savedUri, captures.completed)
     }
 
     @Test

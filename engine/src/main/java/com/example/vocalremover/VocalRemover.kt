@@ -7,6 +7,7 @@ import ai.onnxruntime.OrtLoggingLevel
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.util.Log
+import com.example.vocalremover.processing.InstrumentalRemover
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -34,7 +35,7 @@ data class StereoPcm(
 class VocalRemover(
     context: Context,
     private val backend: ExecutionBackend
-) {
+) : InstrumentalRemover {
 
     private class Loaded(val session: OrtSession, val inputName: String, val outputName: String)
 
@@ -277,9 +278,9 @@ class VocalRemover(
      * is cancellable. Per-call buffers would double the memory for no gain: the model
      * already saturates the CPU/NPU.
      */
-    suspend fun removeVocals(
+    override suspend fun removeVocals(
         signal: StereoPcm,
-        onProgress: (Int) -> Unit = {}
+        onProgress: (Int) -> Unit
     ): StereoPcm = inferenceMutex.withLock { removeVocalsLocked(signal, onProgress) }
 
     private suspend fun removeVocalsLocked(
@@ -422,6 +423,12 @@ class VocalRemover(
         )
         val tEnd = System.nanoTime()
 
+        // A broken accelerator can return garbage without any ORT error: fail the chunk so the
+        // caller can retry the song on another backend. Never applied to CPU (the reference).
+        ChunkOutputCheck.problem(
+            backend, workspace.outputData, chunkL, chunkR, workspace.chunkOutL, workspace.chunkOutR
+        )?.let { throw BackendOutputException("Backend ${backend.id} produced an unusable chunk: $it") }
+
         Log.i(TAG, "Stages: " +
                 "STFT=${(t1-t0)/1_000_000}ms " +
                 "write=${(t2-t1)/1_000_000}ms " +
@@ -525,7 +532,7 @@ class VocalRemover(
         }
     }
 
-    fun close() {
+    override fun close() {
         synchronized(runLock) {
             closed = true
             // With a run in progress, closing is deferred to withSession.

@@ -11,12 +11,12 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.vocalremover.VocalRemover
-import com.example.vocalremover.backend.BackendCandidates
 import com.example.vocalremover.capture.PendingCapture
 import com.example.vocalremover.capture.PendingCaptureRepository
 import com.example.vocalremover.capture.RecordingFileNaming
 import com.example.vocalremover.playback.LibraryPlayer
 import com.example.vocalremover.playback.PlayerState
+import com.example.vocalremover.processing.FallbackInstrumentalExtractor
 import com.example.vocalremover.processing.ProcessingException
 import com.example.vocalremover.processing.ProcessingState
 import com.example.vocalremover.processing.SongProcessor
@@ -384,6 +384,7 @@ class ImportViewModel(
 
     private fun phaseOf(state: ProcessingState): ProcessingPhase? = when (state) {
         ProcessingState.Decoding -> ProcessingPhase.Decoding
+        ProcessingState.PreparingBackend -> ProcessingPhase.PreparingBackend
         is ProcessingState.Processing -> ProcessingPhase.Running(state.percent)
         ProcessingState.Saving -> ProcessingPhase.Saving
         else -> null
@@ -400,14 +401,14 @@ class ImportViewModel(
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = checkNotNull(this[APPLICATION_KEY])
-                // Temporary: the first candidate, until runtime backend selection is wired in.
-                val remover = VocalRemover(app, BackendCandidates.forThisDevice().first())
+                val selector = (app as VocalRemoverApplication).backendSelector
+                val extractor = FallbackInstrumentalExtractor(selector) { VocalRemover(app, it) }
                 ImportViewModel(
                     captures = PendingCaptureRepository.create(app),
-                    processor = SongProcessor.create(app, remover),
+                    processor = SongProcessor.create(app, extractor),
                     player = LibraryPreviewPlayer(LibraryPlayer(app)),
                     displayNameOf = { uri -> queryDisplayName(app, uri) },
-                    releaseResources = remover::close,
+                    releaseResources = extractor::close,
                 )
             }
         }

@@ -6,6 +6,8 @@ import android.net.Uri
 sealed interface ProcessingState {
     data object Idle : ProcessingState
     data object Decoding : ProcessingState
+    /** First launch on this device/build: the backend probe is still running before inference. */
+    data object PreparingBackend : ProcessingState
     /** [percent] 0–100, forwarded from `VocalRemover.removeVocals`. */
     data class Processing(val percent: Int) : ProcessingState
     data object Saving : ProcessingState

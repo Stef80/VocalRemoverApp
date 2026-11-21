@@ -90,8 +90,10 @@ class ProbingBackendSelector(
             } catch (e: Throwable) {
                 // Native load failures (UnsatisfiedLinkError, LinkageError) are Errors and must reject the candidate too.
                 ProbeResult.Rejected("Probe threw ${describe(e)}")
+            } finally {
+                // The process survived the probe (even if cancelled): the marker must not look like a crash.
+                markCompleted(candidate)
             }
-            markCompleted(candidate)
             when (result) {
                 is ProbeResult.Passed -> {
                     Log.i(TAG, "$candidate passed: ${result.runMs} ms, SNR ${result.snrDb} dB")

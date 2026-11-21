@@ -83,6 +83,44 @@ class SongProcessorTest {
     }
 
     @Test
+    fun `shows preparing state while backend is not ready`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        var ready = false
+        val extractor = object : InstrumentalExtractor {
+            override suspend fun extract(mix: StereoPcm, onProgress: (Int) -> Unit) = mix
+            override fun isReady() = ready
+            override suspend fun prepare() {
+                gate.await()
+                ready = true
+            }
+        }
+        val processor = processor(extractor = extractor)
+        val states = recordStates(processor)
+
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) { processor.process(source, "brano") }
+        assertEquals(ProcessingState.PreparingBackend, processor.state.value)
+        gate.complete(Unit)
+        job.join()
+
+        assertEquals(
+            listOf(
+                ProcessingState.Idle,
+                ProcessingState.Decoding,
+                ProcessingState.PreparingBackend,
+                ProcessingState.Processing(0),
+                ProcessingState.Saving,
+                ProcessingState.Done(saved),
+            ),
+            states
+        )
+
+        // Second run: the backend is ready, no preparing state.
+        states.clear()
+        processor.process(source, "brano")
+        assertFalse(ProcessingState.PreparingBackend in states)
+    }
+
+    @Test
     fun `decode failure reports DECODE_FAILED`() = runTest {
         val processor = processor(decoder = PcmDecoder { throw DecodeException("broken") })
 

@@ -18,7 +18,14 @@ class AndroidProcessExitInfo(private val context: Context) : ProcessExitInfo {
         val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val reason = manager.getHistoricalProcessExitReasons(context.packageName, 0, 1)
             .firstOrNull()?.reason
-        return reason == ApplicationExitInfo.REASON_CRASH_NATIVE ||
-            reason == ApplicationExitInfo.REASON_CRASH
+        return isBackendCrash(reason)
+    }
+
+    companion object {
+        /**
+         * Only a native crash can blame the backend: accelerator Java exceptions are caught by the
+         * extractor/prober, so a Java crash (REASON_CRASH) comes from unrelated app code.
+         */
+        fun isBackendCrash(reason: Int?): Boolean = reason == ApplicationExitInfo.REASON_CRASH_NATIVE
     }
 }

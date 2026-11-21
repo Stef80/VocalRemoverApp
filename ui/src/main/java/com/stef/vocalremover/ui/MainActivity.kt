@@ -48,6 +48,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // First launch: the accelerator probe takes a while, so it starts before any import.
+        (application as VocalRemoverApplication).startBackendProbe()
         // After process death the system redelivers the original Intent (the removed extra is not
         // saved): without this check the recreation would reopen Capture and the editor.
         if (savedInstanceState == null && intent.consumeOpenImportScreenExtra()) {

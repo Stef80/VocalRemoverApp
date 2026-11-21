@@ -107,7 +107,7 @@ class ProbingBackendSelectorTest {
         val sel = selector(all, prober, store, key = "1|B")
         assertFalse(sel.isReady())
         assertEquals(QNN, sel.current())
-        assertEquals(all, prober.calls)
+        assertEquals(listOf(QNN, WEBGPU), prober.calls)
     }
 
     @Test
@@ -116,7 +116,7 @@ class ProbingBackendSelectorTest {
         val sel = selector(all, prober)
         val results = listOf(async { sel.current() }, async { sel.current() }).awaitAll()
         assertEquals(listOf(QNN, QNN), results)
-        assertEquals(all, prober.calls)
+        assertEquals(listOf(QNN, WEBGPU), prober.calls)
     }
 
     @Test
@@ -192,6 +192,20 @@ class ProbingBackendSelectorTest {
     }
 
     @Test
+    fun `cancelled probe clears its marker`() = runTest {
+        val store = InMemoryStore()
+        val prober = FakeProber(mapOf(QNN to passed(250)))
+        prober.onProbe = { throw kotlinx.coroutines.CancellationException("left") }
+        try {
+            selector(all, prober, store).current()
+            org.junit.Assert.fail("CancellationException expected")
+        } catch (_: kotlinx.coroutines.CancellationException) {
+        }
+        assertNull(store.value!!.inProgress)
+        assertFalse(store.value!!.failed.containsKey(QNN))
+    }
+
+    @Test
     fun `fastest wins over list order`() = runTest {
         val prober = FakeProber(mapOf(WEBGPU to passed(1500), QNN to passed(250), CPU to passed(6000)))
         assertEquals(QNN, selector(listOf(WEBGPU, QNN, CPU), prober).current())
@@ -200,12 +214,36 @@ class ProbingBackendSelectorTest {
     @Test
     fun `reportFailure picks next fastest not next in list`() = runTest {
         val store = InMemoryStore()
-        val prober = FakeProber(mapOf(WEBGPU to passed(250), QNN to passed(1500), CPU to passed(900)))
-        val sel = selector(listOf(WEBGPU, QNN, CPU), prober, store)
+        // WEBGPU is fastest but listed second: after its failure the next in list would be CPU.
+        val prober = FakeProber(mapOf(QNN to passed(1500), WEBGPU to passed(250)))
+        val sel = selector(listOf(QNN, WEBGPU, CPU), prober, store)
         assertEquals(WEBGPU, sel.current())
         val next = sel.reportFailure(WEBGPU, RuntimeException("x"))
-        assertEquals(CPU, next)
+        assertEquals(QNN, next)
         assertEquals(next, store.value!!.chosen)
+    }
+
+    @Test
+    fun `cpu is not probed when an accelerator passes`() = runTest {
+        val store = InMemoryStore()
+        val prober = FakeProber(mapOf(QNN to ProbeResult.Rejected("bad"), WEBGPU to passed(1500)))
+        val sel = selector(all, prober, store)
+        assertEquals(WEBGPU, sel.current())
+        assertEquals(0, prober.calls.count { it == CPU })
+        assertFalse(store.value!!.timingsMs.containsKey(CPU))
+        // CPU remains the fallback once the only passing accelerator fails.
+        assertEquals(CPU, sel.reportFailure(WEBGPU, RuntimeException("x")))
+    }
+
+    @Test
+    fun `cpu is probed when no accelerator passes`() = runTest {
+        val store = InMemoryStore()
+        val prober = FakeProber(
+            mapOf(QNN to ProbeResult.Rejected("bad"), WEBGPU to ProbeResult.Rejected("SNR 3 dB"), CPU to passed(6000)),
+        )
+        assertEquals(CPU, selector(all, prober, store).current())
+        assertEquals(1, prober.calls.count { it == CPU })
+        assertEquals(6000L, store.value!!.timingsMs[CPU])
     }
 
     @Test
