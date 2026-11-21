@@ -234,6 +234,7 @@ class VocalRemover(
                     QnnConfig.freeDimensionOverrides.forEach { (name, value) ->
                         setSymbolicDimensionValue(name, value)
                     }
+                    QnnConfig.sessionConfig.forEach { (k, v) -> addConfigEntry(k, v) }
                     addQnn(QnnConfig.providerOptions(libDir))
                 }
             }

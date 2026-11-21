@@ -19,6 +19,12 @@ object QnnConfig {
      */
     val freeDimensionOverrides: Map<String, Long> = mapOf("batch_size" to 1L)
 
+    /**
+     * Fail the session instead of silently running unsupported nodes on CPU: a "qnn" session that is
+     * really CPU would be mislabelled and slower.
+     */
+    val sessionConfig: Map<String, String> = mapOf("session.disable_cpu_ep_fallback" to "1")
+
     private const val CONTEXT_PREFIX = "qnn_ctx_"
     private const val CONTEXT_SUFFIX = ".onnx"
 

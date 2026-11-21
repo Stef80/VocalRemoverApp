@@ -9,9 +9,11 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.example.vocalremover.ExecutionBackend
 import com.example.vocalremover.StereoPcm
 import com.example.vocalremover.VocalRemover
-import com.example.vocalremover.backend.BackendCandidates
+import com.example.vocalremover.backend.BackendChoice
 import com.example.vocalremover.backend.OutputQuality
 import com.example.vocalremover.backend.ProbeSignal
+import com.example.vocalremover.backend.ProbingBackendSelector
+import com.example.vocalremover.backend.SharedPrefsBackendChoiceStore
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -41,9 +43,13 @@ class BackendBenchmarkTest {
         val durationSec = args.getString("durationSec")?.toDouble() ?: 20.0
         val minSnrDb = args.getString("minSnrDb")?.toDouble() ?: 20.0
         val backendArg = args.getString("backend") ?: "auto"
-        // auto: for now the first candidate for this SoC.
+        // auto: the backend the app itself would choose (probes on first use, persisted afterwards).
+        var selection: String? = null
         val backend = if (backendArg == "auto") {
-            BackendCandidates.forThisDevice().first()
+            val selector = ProbingBackendSelector.create(context)
+            val chosen = selector.current()
+            selection = describeSelection(SharedPrefsBackendChoiceStore(context).load(), chosen)
+            chosen
         } else {
             ExecutionBackend.fromId(backendArg)
         }
@@ -95,7 +101,8 @@ class BackendBenchmarkTest {
             snrDb = snr,
             outputRms = outRms,
             passed = failure == null,
-            failure = failure
+            failure = failure,
+            selection = selection
         )
         val json = report.toJson()
         Log.i(TAG, json)
@@ -109,6 +116,16 @@ class BackendBenchmarkTest {
         instrumentation.sendStatus(0, Bundle().apply { putString("VRBenchmark", json) })
 
         assertTrue(failure ?: "", failure == null)
+    }
+
+    /** One entry per candidate: probe time in ms or the rejection reason, plus the chosen backend. */
+    private fun describeSelection(choice: BackendChoice?, chosen: ExecutionBackend): String {
+        if (choice == null) return "chosen=${chosen.id}"
+        val parts = ExecutionBackend.entries.mapNotNull { b ->
+            choice.failed[b]?.let { "${b.id}=rejected($it)" }
+                ?: choice.timingsMs[b]?.let { "${b.id}=${it}ms" }
+        }
+        return (parts + "chosen=${chosen.id}").joinToString("; ")
     }
 
     private inline fun timed(block: () -> Unit): Long {

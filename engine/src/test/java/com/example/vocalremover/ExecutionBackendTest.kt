@@ -62,6 +62,11 @@ class ExecutionBackendTest {
         )
     }
 
+    @Test
+    fun `qnn session config disables cpu fallback`() {
+        assertEquals("1", QnnConfig.sessionConfig["session.disable_cpu_ep_fallback"])
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun `rejects unknown backend`() {
         ExecutionBackend.fromId("nnapi")

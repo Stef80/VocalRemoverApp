@@ -16,7 +16,9 @@ data class BenchmarkReport(
     val snrDb: Double,
     val outputRms: Double,
     val passed: Boolean,
-    val failure: String?
+    val failure: String?,
+    /** Per-candidate outcome of the backend probe (timing or rejection reason); null when not auto. */
+    val selection: String? = null
 ) {
     /** Seconds of processing per second of audio (< 1 = faster than real time). */
     val realtimeFactor: Double get() = processMs / 1000.0 / audioSeconds
@@ -36,7 +38,8 @@ data class BenchmarkReport(
         append("\"snrDb\":").append(num(snrDb)).append(',')
         append("\"outputRms\":").append(num(outputRms)).append(',')
         append("\"passed\":").append(passed).append(',')
-        append("\"failure\":").append(failure?.let(::str) ?: "null")
+        append("\"failure\":").append(failure?.let(::str) ?: "null").append(',')
+        append("\"selection\":").append(selection?.let(::str) ?: "null")
         append('}')
     }
 

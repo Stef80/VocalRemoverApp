@@ -1,5 +1,7 @@
 package com.example.vocalremover.backend
 
+import android.content.Context
+import android.os.Build
 import android.util.Log
 import com.example.vocalremover.ExecutionBackend
 import kotlinx.coroutines.CancellationException
@@ -7,8 +9,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * Probes every candidate backend once per [key], keeps the fastest one that passes the quality
- * check and persists the outcome. A marker written around each probe/run lets the next start
+ * Probes the candidate backends once per [key], keeps the fastest one that passes the quality
+ * check and persists the outcome. CPU (last in the list) is probed only when no accelerator
+ * passed: otherwise it stays the untimed last-resort fallback. A marker written around each probe/run lets the next start
  * blacklist a backend that crashed the process.
  */
 class ProbingBackendSelector(
@@ -68,10 +71,17 @@ class ProbingBackendSelector(
     }
 
     private suspend fun probeAll(): ExecutionBackend {
+        var acceleratorPassed = false
         for (candidate in candidates) {
             val s = loaded()
             if (candidate in s.failed) continue
-            if (candidate == ExecutionBackend.CPU && skipCpuProbe) continue
+            if (candidate == ExecutionBackend.CPU) {
+                if (skipCpuProbe) continue
+                if (acceleratorPassed) {
+                    Log.i(TAG, "Skipping CPU probe: an accelerator passed")
+                    continue
+                }
+            }
             markInProgress(candidate)
             val result = try {
                 prober.probe(candidate)
@@ -85,6 +95,7 @@ class ProbingBackendSelector(
             when (result) {
                 is ProbeResult.Passed -> {
                     Log.i(TAG, "$candidate passed: ${result.runMs} ms, SNR ${result.snrDb} dB")
+                    if (candidate != ExecutionBackend.CPU) acceleratorPassed = true
                     update { it.copy(timingsMs = it.timingsMs + (candidate to result.runMs)) }
                 }
                 is ProbeResult.Rejected -> {
@@ -151,8 +162,21 @@ class ProbingBackendSelector(
 
     private fun describe(cause: Throwable) = "${cause::class.java.simpleName}: ${cause.message}"
 
-    private companion object {
-        const val TAG = "BackendSelector"
-        const val UNEXPLAINED_EXITS_LIMIT = 2
+    companion object {
+        private const val TAG = "BackendSelector"
+        private const val UNEXPLAINED_EXITS_LIMIT = 2
+
+        /** The production selector: probes the candidates for this SoC against the bundled CPU reference. */
+        fun create(context: Context): ProbingBackendSelector {
+            val app = context.applicationContext
+            val installTime = app.packageManager.getPackageInfo(app.packageName, 0).lastUpdateTime
+            return ProbingBackendSelector(
+                candidates = BackendCandidates.forThisDevice(),
+                key = "$installTime|${Build.FINGERPRINT}",
+                store = SharedPrefsBackendChoiceStore(app),
+                prober = OrtBackendProber(app),
+                exitInfo = AndroidProcessExitInfo(app),
+            )
+        }
     }
 }
