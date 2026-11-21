@@ -1,0 +1,222 @@
+package com.example.vocalremover.backend
+
+import com.example.vocalremover.ExecutionBackend
+import com.example.vocalremover.ExecutionBackend.CPU
+import com.example.vocalremover.ExecutionBackend.QNN
+import com.example.vocalremover.ExecutionBackend.WEBGPU
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
+class ProbingBackendSelectorTest {
+
+    private class FakeProber(
+        private val results: Map<ExecutionBackend, ProbeResult> = emptyMap(),
+        private val throwing: Set<ExecutionBackend> = emptySet(),
+        private val error: Throwable = IllegalStateException("boom"),
+    ) : BackendProber {
+        val calls = mutableListOf<ExecutionBackend>()
+        var onProbe: (ExecutionBackend) -> Unit = {}
+
+        override suspend fun probe(backend: ExecutionBackend): ProbeResult {
+            calls += backend
+            onProbe(backend)
+            yield()
+            if (backend in throwing) throw error
+            return results.getValue(backend)
+        }
+    }
+
+    private class InMemoryStore(var value: BackendChoice? = null) : BackendChoiceStore {
+        override fun load() = value
+        override fun save(choice: BackendChoice) {
+            value = choice
+        }
+    }
+
+    private fun passed(ms: Long) = ProbeResult.Passed(ms, 40.0)
+
+    private fun selector(
+        candidates: List<ExecutionBackend>,
+        prober: FakeProber,
+        store: InMemoryStore = InMemoryStore(),
+        key: String = "1|A",
+        crash: Boolean? = false,
+    ) = ProbingBackendSelector(candidates, key, store, prober) { crash }
+
+    private val all = listOf(QNN, WEBGPU, CPU)
+
+    @Test
+    fun `picks fastest passing backend`() = runTest {
+        val prober = FakeProber(mapOf(QNN to passed(250), WEBGPU to passed(1500), CPU to passed(6000)))
+        assertEquals(QNN, selector(all, prober).current())
+    }
+
+    @Test
+    fun `quality beats speed`() = runTest {
+        val store = InMemoryStore()
+        val prober = FakeProber(mapOf(WEBGPU to ProbeResult.Rejected("SNR 3.1 dB"), CPU to passed(6000)))
+        assertEquals(CPU, selector(listOf(WEBGPU, CPU), prober, store).current())
+        assertTrue(store.value!!.failed.getValue(WEBGPU).contains("SNR"))
+    }
+
+    @Test
+    fun `exception during probe rejects candidate`() = runTest {
+        val prober = FakeProber(
+            mapOf(WEBGPU to passed(1500), CPU to passed(6000)),
+            throwing = setOf(QNN),
+        )
+        assertEquals(WEBGPU, selector(all, prober).current())
+    }
+
+    @Test
+    fun `nothing passes falls back to cpu`() = runTest {
+        val store = InMemoryStore()
+        val prober = FakeProber(all.associateWith { ProbeResult.Rejected("bad") })
+        assertEquals(CPU, selector(all, prober, store).current())
+        assertEquals(CPU, store.value!!.chosen)
+    }
+
+    @Test
+    fun `stored choice skips probe`() = runTest {
+        val store = InMemoryStore(BackendChoice("1|A", chosen = WEBGPU))
+        val prober = FakeProber()
+        val sel = selector(all, prober, store)
+        assertTrue(sel.isReady())
+        assertEquals(WEBGPU, sel.current())
+        assertTrue(prober.calls.isEmpty())
+    }
+
+    @Test
+    fun `fingerprint change invalidates choice and failures`() = runTest {
+        val store = InMemoryStore(
+            BackendChoice("1|A", chosen = WEBGPU, failed = mapOf(QNN to "crash")),
+        )
+        val prober = FakeProber(mapOf(QNN to passed(250), WEBGPU to passed(1500), CPU to passed(6000)))
+        val sel = selector(all, prober, store, key = "1|B")
+        assertFalse(sel.isReady())
+        assertEquals(QNN, sel.current())
+        assertEquals(all, prober.calls)
+    }
+
+    @Test
+    fun `concurrent current calls share one probe`() = runTest {
+        val prober = FakeProber(mapOf(QNN to passed(250), WEBGPU to passed(1500), CPU to passed(6000)))
+        val sel = selector(all, prober)
+        val results = listOf(async { sel.current() }, async { sel.current() }).awaitAll()
+        assertEquals(listOf(QNN, QNN), results)
+        assertEquals(all, prober.calls)
+    }
+
+    @Test
+    fun `reportFailure returns next fastest passing and persists`() = runTest {
+        val store = InMemoryStore()
+        val prober = FakeProber(mapOf(QNN to passed(250), WEBGPU to passed(1500), CPU to passed(6000)))
+        val sel = selector(all, prober, store)
+        assertEquals(QNN, sel.current())
+        assertEquals(WEBGPU, sel.reportFailure(QNN, RuntimeException("x")))
+        assertTrue(store.value!!.failed.containsKey(QNN))
+        assertEquals(WEBGPU, sel.current())
+        assertEquals(CPU, sel.reportFailure(WEBGPU, RuntimeException("y")))
+        assertEquals(CPU, sel.reportFailure(CPU, RuntimeException("z")))
+        assertFalse(store.value!!.failed.containsKey(CPU))
+    }
+
+    @Test
+    fun `native crash marker blacklists backend`() = runTest {
+        val store = InMemoryStore(BackendChoice("1|A", inProgress = QNN))
+        val prober = FakeProber(mapOf(WEBGPU to passed(1500), CPU to passed(6000)))
+        assertEquals(WEBGPU, selector(all, prober, store, crash = true).current())
+        assertFalse(prober.calls.contains(QNN))
+        assertTrue(store.value!!.failed.containsKey(QNN))
+    }
+
+    @Test
+    fun `user-killed probe does not blacklist backend`() = runTest {
+        val store = InMemoryStore(BackendChoice("1|A", inProgress = QNN))
+        val prober = FakeProber(mapOf(QNN to passed(250), WEBGPU to passed(1500), CPU to passed(6000)))
+        assertEquals(QNN, selector(all, prober, store, crash = false).current())
+        assertTrue(prober.calls.contains(QNN))
+    }
+
+    @Test
+    fun `unknown exit needs two consecutive markers`() = runTest {
+        val store = InMemoryStore(BackendChoice("1|A", inProgress = QNN))
+        val results = mapOf(QNN to passed(250), WEBGPU to passed(1500), CPU to passed(6000))
+
+        // First marker: QNN is retried; its counter is 1 while the retry runs.
+        val first = FakeProber(results)
+        var counterDuringRetry: Int? = null
+        first.onProbe = { if (it == QNN) counterDuringRetry = store.value!!.unexplainedExits[QNN] }
+        assertEquals(QNN, selector(all, first, store, crash = null).current())
+        assertEquals(1, counterDuringRetry)
+
+        // Second marker with the counter still at 1: QNN is dropped.
+        store.value = BackendChoice("1|A", inProgress = QNN, unexplainedExits = mapOf(QNN to 1))
+        val second = FakeProber(results)
+        assertEquals(WEBGPU, selector(all, second, store, crash = null).current())
+        assertFalse(second.calls.contains(QNN))
+    }
+
+    @Test
+    fun `cpu crash is only logged`() = runTest {
+        val store = InMemoryStore(BackendChoice("1|A", inProgress = CPU))
+        val prober = FakeProber(all.associateWith { ProbeResult.Rejected("bad") })
+        assertEquals(CPU, selector(all, prober, store, crash = true).current())
+        assertFalse(prober.calls.contains(CPU))
+        assertFalse(store.value!!.failed.containsKey(CPU))
+    }
+
+    @Test
+    fun `markCompleted clears marker and counter`() {
+        val store = InMemoryStore(
+            BackendChoice("1|A", chosen = QNN, unexplainedExits = mapOf(QNN to 1)),
+        )
+        val sel = selector(all, FakeProber(), store)
+        sel.markInProgress(QNN)
+        assertEquals(QNN, store.value!!.inProgress)
+        sel.markCompleted(QNN)
+        assertNull(store.value!!.inProgress)
+        assertTrue(store.value!!.unexplainedExits.isEmpty())
+    }
+
+    @Test
+    fun `fastest wins over list order`() = runTest {
+        val prober = FakeProber(mapOf(WEBGPU to passed(1500), QNN to passed(250), CPU to passed(6000)))
+        assertEquals(QNN, selector(listOf(WEBGPU, QNN, CPU), prober).current())
+    }
+
+    @Test
+    fun `reportFailure picks next fastest not next in list`() = runTest {
+        val store = InMemoryStore()
+        val prober = FakeProber(mapOf(WEBGPU to passed(250), QNN to passed(1500), CPU to passed(900)))
+        val sel = selector(listOf(WEBGPU, QNN, CPU), prober, store)
+        assertEquals(WEBGPU, sel.current())
+        val next = sel.reportFailure(WEBGPU, RuntimeException("x"))
+        assertEquals(CPU, next)
+        assertEquals(next, store.value!!.chosen)
+    }
+
+    @Test
+    fun `native link error during probe rejects candidate`() = runTest {
+        val store = InMemoryStore()
+        val prober = FakeProber(
+            mapOf(CPU to passed(6000)),
+            throwing = setOf(QNN),
+            error = UnsatisfiedLinkError("libQnn.so"),
+        )
+        assertEquals(CPU, selector(listOf(QNN, CPU), prober, store).current())
+        assertTrue(store.value!!.failed.getValue(QNN).contains("UnsatisfiedLinkError"))
+    }
+}
