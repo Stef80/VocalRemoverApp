@@ -15,6 +15,7 @@ app/release/
 *.apk
 *.aab
 *.keystore
+*.jks
 *.log
 
 # Modelli ML (troppo grandi per git — usa Git LFS se necessario)

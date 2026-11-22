@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ (API 31+). Allowlist: anything not included here is never backed up or transferred.
+     Excluded on purpose: backend_choice (device-specific), capture_draft and
+     capture_terminal_result (paths into cacheDir, which is never restored), filesDir/lyrics and the
+     WorkManager database (keyed by MediaStore Uris, which differ on another device: lyrics would be
+     attached to the wrong track) and the QNN cache (noBackupFilesDir). Keep backup_rules.xml aligned. -->
+<data-extraction-rules>
+    <!-- Only with end-to-end encryption (screen lock set): nothing reaches Drive in clear. -->
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <include domain="sharedpref" path="capture_package_picker.xml" />
+        <include domain="sharedpref" path="now_playing_access.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="capture_package_picker.xml" />
+        <include domain="sharedpref" path="now_playing_access.xml" />
+    </device-transfer>
+</data-extraction-rules>

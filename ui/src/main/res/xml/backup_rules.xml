@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and older (API <= 30). Same allowlist as data_extraction_rules.xml: keep them aligned. -->
+<full-backup-content>
+    <include domain="sharedpref" path="capture_package_picker.xml" />
+    <include domain="sharedpref" path="now_playing_access.xml" />
+</full-backup-content>

@@ -11,6 +11,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.ResponseBody
 import java.io.IOException
 import kotlin.math.abs
 import kotlin.math.roundToLong
@@ -32,8 +33,18 @@ internal class LrclibLyricsProvider(
     private companion object {
         const val DURATION_TOLERANCE_MS = 2_000L
         const val MAX_RETRY_AFTER_SECONDS = 24 * 60 * 60L
+        const val MAX_BODY_BYTES = 2 * 1024 * 1024L
         val json = Json { ignoreUnknownKeys = true }
     }
+
+    /**
+     * Redirects are never followed: a redirect to another host would send it the request (and
+     * the contact in the User-Agent) and make the app accept lyrics from it. A 3xx is a failure.
+     */
+    private val http: OkHttpClient = client.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
 
     /** Outcome of a single request: either a final result, or "not found, keep going". */
     private sealed interface Step {
@@ -99,7 +110,7 @@ internal class LrclibLyricsProvider(
     private suspend fun request(url: HttpUrl): Step = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).header("User-Agent", userAgent).build()
         try {
-            client.newCall(request).execute().use { response ->
+            http.newCall(request).execute().use { response ->
                 log("LRCLIB ${url.encodedPath} → HTTP ${response.code}")
                 val isJson = response.header("Content-Type")?.contains("application/json") == true
                 when {
@@ -109,13 +120,26 @@ internal class LrclibLyricsProvider(
                     !response.isSuccessful -> Step.Done(LyricsResult.Failed("HTTP ${response.code}"))
                     // Some errors come with 200 and plain text: JSON is parsed only when declared.
                     !isJson -> Step.Done(LyricsResult.Failed("Risposta non JSON"))
-                    else -> Step.Body(response.body?.string().orEmpty())
+                    else -> readBounded(response.body)?.let(Step::Body)
+                        ?: Step.Done(LyricsResult.Failed("Risposta troppo grande"))
                 }
             }
         } catch (e: IOException) {
             log("LRCLIB ${url.encodedPath} → network error: ${e.javaClass.simpleName}")
             Step.Done(LyricsResult.RetryLater(null))
         }
+    }
+
+    /**
+     * Reads at most [MAX_BODY_BYTES]; returns null for a larger body (declared or actual), so a
+     * hostile server cannot exhaust memory. Lyrics responses are a few tens of KB.
+     */
+    private fun readBounded(body: ResponseBody?): String? {
+        if (body == null) return ""
+        if (body.contentLength() > MAX_BODY_BYTES) return null
+        val source = body.source()
+        if (source.request(MAX_BODY_BYTES + 1)) return null
+        return source.buffer.readUtf8()
     }
 
     private sealed interface Decoded<out T> {

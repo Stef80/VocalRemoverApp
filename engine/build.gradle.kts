@@ -10,6 +10,7 @@ android {
 
     defaultConfig {
         minSdk = 26
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     // Benchmark code shared between these JVM tests and :ui's androidTest: it never ships in the APK.

@@ -26,10 +26,30 @@ android {
         getByName("androidTest").java.srcDir("../engine/src/benchmarkShared/java")
     }
 
+    // Release key outside the repo: path and passwords come from Gradle properties
+    // vocalremover.release.* (e.g. in ~/.gradle/gradle.properties), never from the code.
+    // Without them the release APK is left unsigned: it never falls back to the debug key.
+    signingConfigs {
+        val releaseStoreFile = providers.gradleProperty("vocalremover.release.storeFile").orNull?.trim()
+        if (!releaseStoreFile.isNullOrEmpty()) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = providers.gradleProperty("vocalremover.release.storePassword").get()
+                keyAlias = providers.gradleProperty("vocalremover.release.keyAlias").get().trim()
+                // PKCS12 keystores use the store password for the key too.
+                keyPassword = providers.gradleProperty("vocalremover.release.keyPassword").orNull
+                    ?: storePassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            // Keep rules for ORT live in :engine's consumer-rules.pro; the other libraries ship theirs.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
