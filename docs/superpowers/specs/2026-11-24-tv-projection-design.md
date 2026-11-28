@@ -291,3 +291,21 @@ Note:
 **Decisione:** si prosegue con D5 (Presentation dal servizio in foreground), senza permesso overlay: sopravvive a Home,
 cambio scheda, schermo spento e chiusura dell'Activity. Lo swipe dalle recenti su ColorOS/Realme UI ferma tutto ed è
 accettato come limite.
+
+## Esito Task 4
+
+Verifica sul dispositivo (2026-11-28), Oppo Find X9 Pro (CPH2791, Android 17), senza Miracast attivo.
+
+| Verifica | Esito |
+|---|---|
+| `TvProjectionInstrumentedTest` (5 test, `VirtualDisplay` con `FLAG_PRESENTATION`) | ✅ 5/5 |
+| `BackendBenchmarkTest` backend `cpu` | ✅ invariato: `processMs` 25583 su 20 s, `realtimeFactor` 1,28 |
+| Notifica multimediale nella tendina con riproduzione reale (`holdMs=30000`) | ✅ titolo "Brano di prova", comandi indietro, play/pausa, avanti, "Termina proiezione"; play/pausa agisce sull'audio |
+
+Note:
+- Su display virtuale privato (`FLAG_OWN_CONTENT_ONLY`) l'accessibilità non elenca le finestre: il test prova la
+  Presentation solo dai pixel dell'`ImageReader`, che bastano perché quel display mostra solo contenuti dell'app.
+- Il test prende il primo display di presentazione: con una TV collegata in Miracast proietta sulla TV (successo durante
+  la prima esecuzione). Va lanciato senza mirroring attivo e senza usare l'app sul telefono (il test la reinstalla).
+- Realme GT2 Pro non provato: ha installato l'APK release firmato, incompatibile con quello di debug del test.
+  Si verifica nel Task 6 (matrice Test Lab e APK release sui telefoni).

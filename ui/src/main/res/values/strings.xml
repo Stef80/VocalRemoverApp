@@ -9,6 +9,9 @@
     <string name="player_track_placeholder">Titolo canzone - Artista</string>
     <string name="player_lyrics_wait">Attendere</string>
     <string name="tv_lyrics_logo_description">Logo VocalRemover</string>
+    <string name="tv_projection_channel_name">Proiezione sulla TV</string>
+    <string name="tv_projection_notification_text">Testo su %1$s</string>
+    <string name="tv_projection_action_stop">Termina proiezione</string>
     <string name="player_lyrics_unavailable">Testo non disponibile per questo brano.</string>
     <string name="player_lyrics_instrumental">Brano strumentale.</string>
     <string name="library_title">Libreria</string>

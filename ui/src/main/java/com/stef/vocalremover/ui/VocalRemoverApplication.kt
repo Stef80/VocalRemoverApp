@@ -7,6 +7,9 @@ import com.example.vocalremover.backend.ProbingBackendSelector
 import com.example.vocalremover.lyrics.TrackLyricsRepository
 import com.example.vocalremover.playback.LibraryPlayer
 import com.stef.vocalremover.ui.player.PlayerSession
+import com.stef.vocalremover.ui.projection.DisplayManagerPresentationDisplaySource
+import com.stef.vocalremover.ui.projection.ProjectionController
+import com.stef.vocalremover.ui.projection.ServiceProjectionHost
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +31,16 @@ class VocalRemoverApplication : Application() {
     /** Created on first use from the main thread, never in `onCreate`: it builds an ExoPlayer. */
     val playerSession: PlayerSession by lazy {
         PlayerSession(LibraryPreviewPlayer(LibraryPlayer(this)), TrackLyricsRepository.create(this)::get)
+    }
+
+    /** Created on first use from the main thread, like [playerSession]. */
+    val projectionController: ProjectionController by lazy {
+        ProjectionController(
+            DisplayManagerPresentationDisplaySource(this),
+            ServiceProjectionHost(this),
+            playerSession,
+            CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+        )
     }
 
     /** Picks the backend in the background (probing it on first launch). Idempotent. */

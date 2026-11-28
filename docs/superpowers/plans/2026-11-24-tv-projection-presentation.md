@@ -249,9 +249,9 @@ private val synced = PlayerLyrics.Synced(
 - Produces:
   - `class ServiceProjectionHost(context: Context) : ProjectionHost`:
     - `show(display)` → `ContextCompat.startForegroundService(context, TvProjectionService.showIntent(context, display.id))`;
-    - `hide()` → `context.startService(TvProjectionService.stopIntent(context))`.
+    - `hide()` → `context.startService(TvProjectionService.hideIntent(context))` (`ACTION_HIDE`, interna: solo `release()` + `stopSelf(startId)`, mai il controller, così non cancella uno `SHOW` accodato dopo; arriva in ordine dopo `ACTION_SHOW`: uno `stopService` tra `startForegroundService` e `startForeground` manderebbe in crash l'app); se lancia `IllegalStateException` (servizio già morto e app in background) ripiega su `context.stopService(...)`.
   - `TvProjectionService` con `companion`:
-    - `fun showIntent(context: Context, displayId: Int): Intent`, `fun stopIntent(context: Context): Intent`;
+    - `fun showIntent(context: Context, displayId: Int): Intent`, `fun hideIntent(context: Context): Intent` (`ACTION_HIDE`, solo per l'host; `ACTION_STOP` è del pulsante della notifica e passa da `projectionController.stop()`);
     - azioni `ACTION_SHOW`, `ACTION_STOP`, `ACTION_TOGGLE`, `ACTION_REWIND`, `ACTION_FORWARD`;
     - extra `EXTRA_DISPLAY_ID`: vale solo per quell'avvio (l'id della connessione corrente), non viene salvato.
   - `class TvPresentation(context: Context, display: Display, content: @Composable () -> Unit) : Presentation`: costruita con il contesto del servizio; **non** chiama `window.setType` e non aggiunge `FLAG_SECURE`.
@@ -268,7 +268,7 @@ Comportamento del servizio:
   - poi crea `TvPresentation(this, display)` e chiama `show()`;
   - la `ComposeView` è ospitata da un `OverlayLifecycleOwner` (`attach()` prima di `show()`, `detach()` alla chiusura) e il contenuto è `TvLyricsScreen(playerSession.state.collectAsState().value)`.
   - Un secondo `ACTION_SHOW` sostituisce la Presentation esistente.
-- `ACTION_STOP`: chiude la Presentation, rilascia la `MediaSession`, `stopForeground(STOP_FOREGROUND_REMOVE)`, `stopSelf()`.
+- `ACTION_HIDE`: chiude la Presentation, rilascia la `MediaSession`, `stopForeground(STOP_FOREGROUND_REMOVE)`, `stopSelf(startId)`. `ACTION_STOP` (notifica) chiama solo `projectionController.stop()`.
 - `ACTION_TOGGLE` / `ACTION_REWIND` / `ACTION_FORWARD` (dalla notifica) e i callback della `MediaSession` (`onPlay`, `onPause`, `onRewind`, `onFastForward`, `onSeekTo`, `onStop`): delegano a `PlayerSession`. `onStop` ed "Termina proiezione" chiamano `projectionController.stop()`.
 - La `MediaSession` (tag `"VocalRemoverTv"`) è attiva finché il servizio vive.
   - Raccogliendo `playerSession.state` aggiorna `setPlaybackState` con `sessionPlaybackFor` e `setMetadata` (`METADATA_KEY_TITLE`, `METADATA_KEY_DURATION`), e ricostruisce la notifica.
@@ -312,7 +312,7 @@ Test strumentato `TvProjectionInstrumentedTest` (AndroidJUnit4, package `com.ste
 }
 ```
 
-- [ ] **Step 1: Scrivere i test JVM che falliscono** (`ProjectionPlaybackStateTest`, Robolectric per `PlaybackState`):
+- [x] **Step 1: Scrivere i test JVM che falliscono** (`ProjectionPlaybackStateTest`, Robolectric per `PlaybackState`):
 
 ```kotlin
 @Test fun `in riproduzione stato PLAYING con posizione`() // isPlaying=true, positionMs=12_000 → STATE_PLAYING, 12_000
@@ -320,8 +320,8 @@ Test strumentato `TvProjectionInstrumentedTest` (AndroidJUnit4, package `com.ste
 @Test fun `testi in caricamento BUFFERING senza azioni`() // lyrics=Loading → STATE_BUFFERING, actions == 0L
 @Test fun `senza brano STATE_NONE`()
 ```
-- [ ] **Step 2: Verificare che falliscano.** `gradle :ui:testDebugUnitTest --tests "com.stef.vocalremover.ui.projection.ProjectionPlaybackStateTest"`. Atteso: errore di compilazione.
-- [ ] **Step 3: Implementare `sessionPlaybackFor`, `TvPresentation`, `TvProjectionService`, `ServiceProjectionHost` e `projectionController`** come sopra.
+- [x] **Step 2: Verificare che falliscano.** `gradle :ui:testDebugUnitTest --tests "com.stef.vocalremover.ui.projection.ProjectionPlaybackStateTest"`. Atteso: errore di compilazione.
+- [x] **Step 3: Implementare `sessionPlaybackFor`, `TvPresentation`, `TvProjectionService`, `ServiceProjectionHost` e `projectionController`** come sopra.
   - Manifest di `:ui`:
     - `<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />`
     - `<service android:name="com.stef.vocalremover.ui.projection.TvProjectionService" android:exported="false" android:foregroundServiceType="mediaPlayback" />`
@@ -330,14 +330,14 @@ Test strumentato `TvProjectionInstrumentedTest` (AndroidJUnit4, package `com.ste
     - `tv_projection_notification_text` ("Testo su %1$s")
     - `tv_projection_action_stop` ("Termina proiezione")
   - Riusare le esistenti `control_rewind_description`, `control_play_description`, `control_pause_description`, `control_forward_description` come titoli delle azioni.
-- [ ] **Step 4: Verificare i JVM.** `gradle :ui:testDebugUnitTest :ui:assembleDebug :ui:lintDebug`. Atteso: verde, nessun avviso nuovo su servizi in foreground o testo hard-coded.
-- [ ] **Step 5: Scrivere ed eseguire il test strumentato** su un telefono collegato via adb, senza Miracast (il display è virtuale):
+- [x] **Step 4: Verificare i JVM.** `gradle :ui:testDebugUnitTest :ui:assembleDebug :ui:lintDebug`. Atteso: verde, nessun avviso nuovo su servizi in foreground o testo hard-coded.
+- [x] **Step 5: Scrivere ed eseguire il test strumentato** su un telefono collegato via adb, senza Miracast (il display è virtuale):
   `gradle :ui:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.stef.vocalremover.ui.projection.TvProjectionInstrumentedTest`
-  Atteso: 4 test verdi. Poi verificare che il benchmark non sia toccato: `gradle :ui:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.vocalremover.benchmark.BackendBenchmarkTest -Pandroid.testInstrumentationRunnerArguments.backend=cpu` resta verde.
-- [ ] **Step 6: Notifica con la riproduzione reale su ColorOS** (Oppo Find X9 Pro):
+  Atteso: 4 test verdi (diventati 5 con `stop_e_start_ravvicinati`; 5/5 sull'Oppo il 2026-11-28). Poi verificare che il benchmark non sia toccato: `gradle :ui:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.vocalremover.benchmark.BackendBenchmarkTest -Pandroid.testInstrumentationRunnerArguments.backend=cpu` resta verde.
+- [x] **Step 6: Notifica con la riproduzione reale su ColorOS** (Oppo Find X9 Pro):
   `gradle :ui:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.stef.vocalremover.ui.projection.TvProjectionInstrumentedTest#la_notifica_media_compare_con_la_riproduzione -Pandroid.testInstrumentationRunnerArguments.holdMs=30000`
   Durante i 30 s aprire la tendina. Atteso: notifica multimediale con titolo "Brano di prova" e i comandi; play/pausa dalla notifica agisce sull'audio. Annotare l'esito nella spec ("Esito Task 4").
-- [ ] **Step 7: Staging.** `git add`; proporre il commit "feat(ui): foreground service showing the karaoke presentation with media controls". Fermarsi per la revisione.
+- [x] **Step 7: Staging.** `git add`; proporre il commit "feat(ui): foreground service showing the karaoke presentation with media controls". Fermarsi per la revisione.
 
 ---
 

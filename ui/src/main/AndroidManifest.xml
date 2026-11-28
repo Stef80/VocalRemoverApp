@@ -5,6 +5,7 @@
     <!-- Floating widget to manage recording on top of other apps -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <application
         android:name="com.stef.vocalremover.ui.VocalRemoverApplication"
@@ -47,6 +48,12 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="floating_recording_control_widget" />
         </service>
+
+        <!-- Karaoke on a presentation display: not exported, no overlay permission needed. -->
+        <service
+            android:name="com.stef.vocalremover.ui.projection.TvProjectionService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
     </application>
 </manifest>
