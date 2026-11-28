@@ -19,7 +19,6 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -84,7 +83,19 @@ class PlayerViewModelTest {
         storedLyrics = null
         dispatcher.scheduler.advanceTimeBy(PlayerSession.LYRICS_POLL_MS * 3)
         assertEquals(listOf("stop"), player.calls)
-        assertNull(vm.state.value)
+        assertEquals(track, vm.state.value?.track)
+    }
+
+    @Test
+    fun `play after leaving during the wait starts the track once lyrics arrived`() {
+        storedLyrics = pending()
+        val vm = PlayerViewModel(session, isProjecting = { false })
+        vm.open(track)
+        vm.leave()
+        storedLyrics = null
+        dispatcher.scheduler.advanceTimeBy(PlayerSession.LYRICS_POLL_MS + 1)
+        vm.play()
+        assertEquals(listOf("stop", "play(${track.uri})"), player.calls)
     }
 
     @Test

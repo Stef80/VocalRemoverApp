@@ -36,6 +36,8 @@ class PlayerSession(
     private val track = MutableStateFlow<LibraryTrack?>(null)
     private val lyrics = MutableStateFlow<PlayerLyrics>(PlayerLyrics.Unavailable)
     private var lyricsJob: Job? = null
+    /** Whether the track starts by itself once the lyrics are loaded. */
+    private var autoplay = true
 
     /** `null` until a track is opened (or after the open track has been deleted). */
     val state: StateFlow<PlayerUiState?> = combine(track, player.state, lyrics) { track, playback, lyrics ->
@@ -54,10 +56,12 @@ class PlayerSession(
 
     /**
      * Opens the track and plays it from the start, even if it was already the open one. If the lyrics are still
-     * downloading, playback starts only when the download finishes (with or without lyrics).
+     * downloading, playback starts only when the download finishes (with or without lyrics), unless [pause] is
+     * called in the meantime: then the track stays open and starts only when the user presses play.
      */
     fun open(track: LibraryTrack) {
         lyricsJob?.cancel()
+        autoplay = true
         this.track.value = track
         lyrics.value = PlayerLyrics.Loading
         player.stop()
@@ -66,24 +70,12 @@ class PlayerSession(
                 val loaded = PlayerLyrics.from(withContext(ioDispatcher) { loadLyrics(track.uri) })
                 if (loaded != null) {
                     lyrics.value = loaded
-                    player.play(track.uri)
+                    if (autoplay) player.play(track.uri)
                     return@launch
                 }
                 delay(LYRICS_POLL_MS)
             }
         }
-    }
-
-    /**
-     * Gives up a start still waiting for the lyrics (the user left the player): the polling stops and the open
-     * track is closed, so the music cannot start later on its own. Coming back means opening the track again
-     * with [open], which reads the lyrics state anew. No-op when the lyrics are already loaded.
-     */
-    fun cancelPendingStart() {
-        if (lyrics.value != PlayerLyrics.Loading) return
-        lyricsJob?.cancel()
-        track.value = null
-        lyrics.value = PlayerLyrics.Unavailable
     }
 
     fun togglePlayback() {
@@ -98,8 +90,11 @@ class PlayerSession(
         player.play(current.track.uri)
     }
 
+    /** Pauses; if the start is still waiting for the lyrics, it will not autoplay when they arrive. */
     fun pause() {
-        if (state.value?.isPlaying == true) player.pause()
+        val current = state.value ?: return
+        if (current.lyrics == PlayerLyrics.Loading) autoplay = false
+        if (current.isPlaying) player.pause()
     }
 
     fun seekTo(positionMs: Long) {

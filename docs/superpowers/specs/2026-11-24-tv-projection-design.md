@@ -120,6 +120,8 @@ Anti-obiettivi (sarebbe un fallimento anche se "funziona"):
 - **D9 – Più display di presentazione.** Si usa il primo restituito da `DisplayManager` per la categoria
   presentazione. Se il display proiettato sparisce, vale D6 anche se ne compare un altro. L'id del display vale solo
   per la connessione corrente (cambia a ogni connessione) e non viene mai salvato.
+  Limite noto: con più display di presentazione si usa il primo, e un display virtuale pubblico di un'altra app
+  potrebbe essere scelto al posto della TV.
 - **D10 – Eliminazione durante la proiezione: evitata, non gestita.** Mentre si proietta, la voce "Elimina"
   (`library_action_delete`) del menu dei brani della Libreria (`PlayableTracks`) è **disabilitata** (visibile ma
   non selezionabile) per tutti i brani, e torna attiva appena la proiezione termina. Se una conferma di

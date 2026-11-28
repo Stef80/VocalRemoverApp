@@ -139,6 +139,30 @@ class PlayerSessionTest {
     }
 
     @Test
+    fun `pause while lyrics pending keeps the track open without autoplay`() {
+        storedLyrics = lyrics(LyricsStatus.PENDING)
+        session.open(track)
+        session.pause()
+        storedLyrics = lyrics(LyricsStatus.FOUND, lines = listOf(TimedLine(6_000, "uno")))
+        dispatcher.scheduler.advanceTimeBy(PlayerSession.LYRICS_POLL_MS + 1)
+        assertEquals(listOf("stop"), player.calls)
+        assertEquals(track, session.state.value?.track)
+        assertEquals(true, session.state.value?.lyrics is PlayerLyrics.Synced)
+        session.play()
+        assertEquals(listOf("stop", "play(${track.uri})"), player.calls)
+    }
+
+    @Test
+    fun `reopening after a pause during the wait autoplays again`() {
+        storedLyrics = lyrics(LyricsStatus.PENDING)
+        session.open(track)
+        session.pause()
+        storedLyrics = null
+        session.open(track)
+        assertEquals(listOf("stop", "stop", "play(${track.uri})"), player.calls)
+    }
+
+    @Test
     fun `deleting the open track stops and closes it`() {
         session.open(track)
         player.calls.clear()

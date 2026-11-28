@@ -84,14 +84,9 @@ class PlayerViewModel(
 
     fun forward() = session.forward()
 
-    /**
-     * Leaving the player stops the music and any start still waiting for the lyrics, unless it is being
-     * projected: then everything keeps going.
-     */
+    /** Leaving the player stops the music, unless it is being projected: then it keeps going. */
     fun leave() {
-        if (isProjecting()) return
-        session.pause()
-        session.cancelPendingStart()
+        if (!isProjecting()) session.pause()
     }
 
     fun onTrackDeleted(uri: Uri) = session.onTrackDeleted(uri)

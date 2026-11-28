@@ -69,7 +69,7 @@ Sposta la logica di `PlayerViewModel` (brano, testi, attesa dei testi, seek, rin
     - `val state: StateFlow<PlayerUiState?>`
     - `fun open(track: LibraryTrack)`, `fun togglePlayback()`, `fun play()`, `fun pause()`, `fun seekTo(positionMs: Long)`, `fun rewind()`, `fun forward()`, `fun onTrackDeleted(uri: Uri)`, `fun onTrackRenamed(uri: Uri, title: String)`
     - `companion object { const val SKIP_MS = 10_000L; internal const val LYRICS_POLL_MS = 1_000L }`
-  - `class PlayerViewModel(session: PlayerSession, isProjecting: () -> Boolean = { false }) : ViewModel()`: stessi metodi pubblici di oggi delegati a `session`. `leave()`, solo se `!isProjecting()`, chiama `session.pause()` e `session.cancelPendingStart()` (annulla l'attesa dei testi e chiude il brano aperto se i testi sono ancora `Loading`; si torna con `open`). `onCleared()` **non** rilascia più il player.
+  - `class PlayerViewModel(session: PlayerSession, isProjecting: () -> Boolean = { false }) : ViewModel()`: stessi metodi pubblici di oggi delegati a `session`. `leave()` chiama `session.pause()` solo se `!isProjecting()`. `PlayerSession.pause()` durante l'attesa dei testi (`Loading`) toglie l'autoplay: il brano resta aperto, i testi si caricano, ma `play()` non parte all'arrivo dei testi; parte solo se l'utente preme play (un nuovo `open` ripristina l'autoplay). `onCleared()` **non** rilascia più il player.
   - `VocalRemoverApplication.playerSession: PlayerSession` (`by lazy`, creato al primo accesso dal main thread con `LibraryPreviewPlayer(LibraryPlayer(this))` e `TrackLyricsRepository.create(this)::get`). Mai toccato in `Application.onCreate`.
   - `PlayerUiState` e `PlayerLyrics` restano dove sono, invariati.
 
@@ -115,7 +115,7 @@ Sposta la logica di `PlayerViewModel` (brano, testi, attesa dei testi, seek, rin
   - `enum class ProjectionEvent { DISCONNECTED, PLAYBACK_ERROR }`
   - `class ProjectionController(source: PresentationDisplaySource, host: ProjectionHost, session: PlayerSession, scope: CoroutineScope)` con:
     - `val state: StateFlow<ProjectionState>`
-    - `val events: SharedFlow<ProjectionEvent>` (`extraBufferCapacity = 1`)
+    - `val events: Flow<ProjectionEvent>` (`Channel(CONFLATED).receiveAsFlow()`: l'ultimo evento attende un consumatore e arriva una volta sola; un solo collector alla volta)
     - `fun start(): ProjectionStartResult`
     - `fun stop()`: idempotente; chiama `host.hide()` solo se si stava proiettando
     - `val isProjecting: Boolean`
@@ -135,7 +135,7 @@ Regole (dalla spec):
 - Se mentre si proietta `session.state.value?.error` diventa non `null` (D11: file cancellato da un'altra app o
   errore di riproduzione): `stop()` ed emette `PLAYBACK_ERROR`. Un errore fuori proiezione non fa nulla.
 
-- [ ] **Step 1: Scrivere i test che falliscono** (Robolectric come `PlayerSessionTest`, con `FakeDisplaySource` basato su `MutableStateFlow`, `FakeHost` che registra `show`/`hide` e il `FakePlayer` del Task 1):
+- [x] **Step 1: Scrivere i test che falliscono** (Robolectric come `PlayerSessionTest`, con `FakeDisplaySource` basato su `MutableStateFlow`, `FakeHost` che registra `show`/`hide` e il `FakePlayer` del Task 1):
 
 ```kotlin
 @Test fun `senza display lo stato è NoDisplay e start restituisce NO_DISPLAY`()
@@ -165,10 +165,10 @@ Regole (dalla spec):
 @Test fun `Elimina torna attiva dopo stop e dopo disconnessione`()
     // start → deleteEnabled(state) falso; stop → vero; start → source.display.value = null → vero
 ```
-- [ ] **Step 2: Verificare che falliscano.** `gradle :ui:testDebugUnitTest --tests "com.stef.vocalremover.ui.projection.*"`. Atteso: errore di compilazione.
-- [ ] **Step 3: Implementare modello, interfacce, `ProjectionController` e `DisplayManagerPresentationDisplaySource`** con le regole sopra. Il controller osserva `source.display` in `scope`.
-- [ ] **Step 4: Verificare.** Stesso comando dello Step 2. Atteso: PASS. Poi `gradle :ui:testDebugUnitTest`, tutto verde.
-- [ ] **Step 5: Staging.** `git add`; proporre il commit "feat(ui): projection state machine and presentation display source". Fermarsi per la revisione.
+- [x] **Step 2: Verificare che falliscano.** `gradle :ui:testDebugUnitTest --tests "com.stef.vocalremover.ui.projection.*"`. Atteso: errore di compilazione.
+- [x] **Step 3: Implementare modello, interfacce, `ProjectionController` e `DisplayManagerPresentationDisplaySource`** con le regole sopra. Il controller osserva `source.display` in `scope`.
+- [x] **Step 4: Verificare.** Stesso comando dello Step 2. Atteso: PASS. Poi `gradle :ui:testDebugUnitTest`, tutto verde.
+- [x] **Step 5: Staging.** `git add`; proporre il commit "feat(ui): projection state machine and presentation display source". Fermarsi per la revisione.
 
 ---
 
@@ -354,7 +354,7 @@ Test strumentato `TvProjectionInstrumentedTest` (AndroidJUnit4, package `com.ste
 - Test: la regola `deleteEnabled` è già coperta in `ProjectionControllerTest` (Task 2); qui verifica manuale.
 
 **Interfaces:**
-- Consumes: `ProjectionController.state/events/start/stop`, `ProjectionStartResult`, `ProjectionEvent`, `deleteEnabled(state)` (Task 2); `VocalRemoverApplication.projectionController` (Task 4).
+- Consumes: `ProjectionController.state/events/start/stop` (`events` è un `Flow` con consegna unica dell'ultimo evento, raccolto da un solo collector), `ProjectionStartResult`, `ProjectionEvent`, `deleteEnabled(state)` (Task 2); `VocalRemoverApplication.projectionController` (Task 4).
 - Produces:
   - `@Composable fun ProjectionButton(state: ProjectionState, onClick: () -> Unit, modifier: Modifier = Modifier)`: `IconButton` con `ic_projection_tv`; in `Projecting` usa `FilledIconButton` (evidenziato). Content description:
     - `NoDisplay` → `projection_connect_description`;
