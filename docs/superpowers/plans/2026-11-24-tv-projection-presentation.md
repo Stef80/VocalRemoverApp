@@ -187,7 +187,7 @@ Regole (dalla spec):
   - `object KaraokeLines { const val BEFORE = 2; const val AFTER = 2; fun window(lyrics: PlayerLyrics.Synced, positionMs: Long): KaraokeWindow; fun plainScrollFraction(positionMs: Long, durationMs: Long): Float }`
   - `@Composable fun TvLyricsScreen(state: PlayerUiState?)`
 
-- [ ] **Step 1: Scrivere i test che falliscono:**
+- [x] **Step 1: Scrivere i test che falliscono:**
 
 ```kotlin
 private val synced = PlayerLyrics.Synced(
@@ -211,10 +211,10 @@ private val synced = PlayerLyrics.Synced(
     assertEquals(0f, KaraokeLines.plainScrollFraction(10_000, 0))
 }
 ```
-- [ ] **Step 2: Verificare che falliscano.** `gradle :ui:testDebugUnitTest --tests "com.stef.vocalremover.ui.projection.KaraokeLinesTest"`. Atteso: errore di compilazione.
-- [ ] **Step 3: Implementare `KaraokeLines`.** Usa `activeLine()`; `plainScrollFraction` = `(positionMs / durationMs).coerceIn(0f, 1f)`, e `0f` se `durationMs <= 0`.
-- [ ] **Step 4: Verificare.** Stesso comando dello Step 2. Atteso: PASS.
-- [ ] **Step 5: Implementare `TvLyricsScreen`** (D1 della spec), con `VocalRemoverTheme` e sfondo scuro del tema:
+- [x] **Step 2: Verificare che falliscano.** `gradle :ui:testDebugUnitTest --tests "com.stef.vocalremover.ui.projection.KaraokeLinesTest"`. Atteso: errore di compilazione.
+- [x] **Step 3: Implementare `KaraokeLines`.** Usa `activeLine()`; `plainScrollFraction` = `(positionMs / durationMs).coerceIn(0f, 1f)`, e `0f` se `durationMs <= 0`.
+- [x] **Step 4: Verificare.** Stesso comando dello Step 2. Atteso: PASS.
+- [x] **Step 5: Implementare `TvLyricsScreen`** (D1 della spec), con `VocalRemoverTheme` e sfondo scuro del tema:
   - testata fissa in alto a sinistra: `logo_corallo_blu` (72.dp) e titolo del brano;
   - `Synced`: colonna centrata; le righe `previous`/`next` in `headlineSmall`, colore `onSurfaceVariant`; la riga `active` in `displayMedium`, grassetto, colore `primary`; cambio di riga animato con `AnimatedContent` (la chiave è l'indice attivo);
   - `Plain`: `Text` in `headlineMedium` dentro `verticalScroll`; un `LaunchedEffect(fraction)` porta la scroll a `fraction * scrollState.maxValue` con `animateScrollTo`, in modo che lo scorrimento sia lento e segua pausa e seek;
@@ -222,9 +222,10 @@ private val synced = PlayerLyrics.Synced(
   - `Loading`: come sopra, più `R.string.player_lyrics_wait`;
   - `state == null`: solo il logo.
 
+  Nelle schermate solo-titolo (`Loading`/`Instrumental`/`Unavailable`/`null`) la testata è omessa: il logo grande e il titolo sono già il contenuto.
   Stringhe nuove: `tv_lyrics_logo_description` ("Logo VocalRemover"). Riusare `player_lyrics_wait`. Aggiungere due `@Preview` 1920×1080 (`Synced` e `Instrumental`).
-- [ ] **Step 6: Verificare.** `gradle :ui:assembleDebug :ui:lintDebug`. Atteso: BUILD SUCCESSFUL, nessun nuovo `HardcodedText`. Controllare le preview in Android Studio (`android studio render-compose-preview`, se disponibile).
-- [ ] **Step 7: Staging.** `git add`; proporre il commit "feat(ui): full-screen karaoke view for the TV". Fermarsi per la revisione.
+- [x] **Step 6: Verificare.** `gradle :ui:assembleDebug :ui:lintDebug`. Atteso: BUILD SUCCESSFUL, nessun nuovo `HardcodedText`. Controllare le preview in Android Studio (`android studio render-compose-preview`, se disponibile).
+- [x] **Step 7: Staging.** `git add`; proporre il commit "feat(ui): full-screen karaoke view for the TV". Fermarsi per la revisione.
 
 ---
 
@@ -388,6 +389,11 @@ Stringhe nuove:
 - `projection_no_display`: "Avvia la proiezione dello schermo dal menu rapido del telefono, poi tocca di nuovo Proietta."
 - `projection_disconnected`: "TV scollegata: riproduzione in pausa."
 - `projection_stopped_error`: "Impossibile riprodurre il brano: proiezione terminata."
+
+Dalla revisione del Task 2 (da fare in questo task, ciascuno con il suo test):
+- **Play durante l'attesa dei testi:** oggi `PlayerSession.play()` e `togglePlayback()` con testi `Loading` tornano senza fare nulla, quindi dopo una pausa (autoplay disattivato) toccare Play non ha effetto e va ripremuto dopo. Durante `Loading` devono invece impostare `autoplay = true` ("parti appena i testi sono pronti"). Test in `PlayerSessionTest`: pause durante l'attesa → play durante l'attesa → arrivo dei testi → `play(uri)` chiamato una volta.
+- **Robustezza di `pause()`:** leggere le sorgenti dirette invece di `state.value` (derivato con `stateIn`, può essere in ritardo di un giro se `pause()` arriva da un'altra coroutine subito dopo `open()`): `if (lyrics.value == PlayerLyrics.Loading) autoplay = false` e `if (player.state.value.isPlaying) player.pause()`.
+- **Test end-to-end a livello controller** in `ProjectionControllerTest`: proiezione con testi PENDING → disconnessione → arrivo dei testi → nessun `play`. Protegge la proprietà se in futuro `onDisplayChanged` smettesse di chiamare `session.pause()`.
 
 - [ ] **Step 1: Implementare.** `PlayerViewModel.Factory` (`isProjecting = { app.projectionController.isProjecting }`), poi `ProjectionButton`, `PlayerScreen`, `PlayableTracks`, `LibraryScreen`/`LibraryRoute` e `MainActivity`. In `MainActivity` lo stato si legge con `app.projectionController.state.collectAsState()` e si passa a `PlayerScreen` (`projection`, `onProjectionClick`) e a `LibraryRoute` (`deleteEnabled`). Aggiornare le `@Preview`: `PlayerScreen` con `Projecting(ProjectionDisplay(2, "LG TV"))`, `PlayableTracks` con `deleteEnabled = false`.
 - [ ] **Step 2: Verificare.** `gradle :ui:testDebugUnitTest :ui:lintDebug :ui:assembleDebug`. Atteso: verde.
