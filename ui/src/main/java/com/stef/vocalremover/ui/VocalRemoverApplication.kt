@@ -4,6 +4,9 @@ import android.app.Application
 import android.util.Log
 import com.example.vocalremover.backend.BackendSelector
 import com.example.vocalremover.backend.ProbingBackendSelector
+import com.example.vocalremover.lyrics.TrackLyricsRepository
+import com.example.vocalremover.playback.LibraryPlayer
+import com.stef.vocalremover.ui.player.PlayerSession
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +24,11 @@ class VocalRemoverApplication : Application() {
     private val probeStarted = AtomicBoolean(false)
 
     val backendSelector: BackendSelector by lazy { ProbingBackendSelector.create(this) }
+
+    /** Created on first use from the main thread, never in `onCreate`: it builds an ExoPlayer. */
+    val playerSession: PlayerSession by lazy {
+        PlayerSession(LibraryPreviewPlayer(LibraryPlayer(this)), TrackLyricsRepository.create(this)::get)
+    }
 
     /** Picks the backend in the background (probing it on first launch). Idempotent. */
     fun startBackendProbe() {

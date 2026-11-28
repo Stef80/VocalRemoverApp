@@ -5,7 +5,7 @@ import com.example.vocalremover.playback.LibraryPlayer
 import com.example.vocalremover.playback.PlayerState
 import kotlinx.coroutines.flow.StateFlow
 
-/** Audio preview of the editor and the Import screen; an interface so the ViewModel can be tested. */
+/** Audio preview of the editor, the Import screen and the Player; an interface so the ViewModel and PlayerSession can be tested. */
 interface PreviewPlayer {
     val state: StateFlow<PlayerState>
     fun play(uri: Uri)
